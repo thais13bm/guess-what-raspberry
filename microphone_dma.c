@@ -3,7 +3,7 @@
 #include "pico/stdlib.h"
 #include "hardware/adc.h"
 #include "hardware/dma.h"
-#include "C:\Users\clien\Documents\embarca_tech\BitDogLab-C\microphone_dma\neopixel.c"
+#include "neopixel.c"
 
 // Pino e canal do microfone no ADC.
 #define MIC_CHANNEL 2

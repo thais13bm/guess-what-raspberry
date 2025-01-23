@@ -8,6 +8,12 @@ from vosk import Model, KaldiRecognizer
 SERVER_IP = '192.168.1.193'  # Aceita conexões de qualquer IP
 SERVER_PORT = 5000
 BUFFER_SIZE = 4096  # Tamanho do buffer para receber dados
+AUDIO_DURATION = 10  # Duração do áudio em segundos
+
+
+full_audio_data = []  # Armazena os dados de áudio completos
+total_samples = 0 
+
 
 # Caminho para o modelo de português do Vosk
 MODEL_PATH = "vosk-model-small-pt-0.3"  # O modelo baixado e descompactado
@@ -42,26 +48,35 @@ def transcribe_audio(audio_path):
 
 # Inicia o servidor
 def start_server():
+
+    full_audio_data = []  # Armazena os dados de áudio completos
+    total_samples = 0 
+
     print(f"Iniciando servidor TCP na porta {SERVER_PORT}...")
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.bind((SERVER_IP, SERVER_PORT))
     server_socket.listen(1)  # Aceita apenas um cliente por vez
     print(f"Servidor esperando conexões em {SERVER_IP}:{SERVER_PORT}")
 
+    client_socket, client_address = server_socket.accept()
+    print(f"Cliente conectado: {client_address}")
+
     while True:
-        client_socket, client_address = server_socket.accept()
-        print(f"Cliente conectado: {client_address}")
+        ## acho que isso aqui nao devia tar no while. porque eu so quero 1 cliente
+        
 
         try:
-            # Recebe os primeiros 4 bytes com o tamanho do JSON
+            #full_audio_data = []  # Armazena os dados de áudio completos
+            #total_samples = 0  # Contador de amostras recebidas
+            # Recebe os primeiros 4 bytes com o tamanho do dado
             size_data = client_socket.recv(4)
             if len(size_data) < 4:
                 raise ValueError("Tamanho dos dados inválido.")
-            
+
             data_size = int.from_bytes(size_data, byteorder='big')
             print(f"Tamanho dos dados recebidos: {data_size} bytes")
 
-            # Recebe os dados JSON
+            # Recebe os dados binários
             data = b""
             while len(data) < data_size:
                 packet = client_socket.recv(BUFFER_SIZE)
@@ -69,25 +84,21 @@ def start_server():
                     raise ConnectionError("Conexão encerrada pelo cliente.")
                 data += packet
 
-            # Decodifica o JSON recebido
-            json_data = json.loads(data.decode('utf-8'))
-            audio_data = np.array(json_data.get('audio'), dtype=np.int16)
+            # Decodifica os dados binários em um array de uint16
+            audio_data = np.frombuffer(data, dtype=np.uint16)
 
-            print("vetor recebido:", audio_data)
+            print(audio_data)
 
-            sample_rate = json_data.get('sample_rate', 16000)
+            full_audio_data.append(audio_data)
+            total_samples += len(audio_data)
 
-            # Salva o áudio como WAV
-            audio_path = "received_audio.wav"
-            save_audio_as_wav(audio_data, sample_rate, audio_path)
+            print(f"Dados acumulados: {total_samples} amostras")
 
-            # Transcreve o áudio
-            transcription = transcribe_audio(audio_path)
-
-            # Envia a transcrição de volta ao cliente
-            response = json.dumps({"text": transcription})
-            client_socket.sendall(len(response).to_bytes(4, byteorder='big'))
-            client_socket.sendall(response.encode('utf-8'))
+            # Verifica se o áudio acumulado já atingiu 10 segundos
+            if total_samples >= 16000 * AUDIO_DURATION:
+                print("Áudio suficiente recebido, processando...")
+                break
+            
 
         except Exception as e:
             print(f"Erro: {e}")
@@ -98,6 +109,28 @@ def start_server():
         #finally:
          #   client_socket.close()
           #  print(f"Conexão com {client_address} encerrada.")
+
+    # Concatena os dados de áudio acumulados
+    full_audio_array = np.concatenate(full_audio_data)
+
+    # Salva o áudio como WAV
+    audio_path = "received_audio.wav"
+    save_audio_as_wav(full_audio_array, sample_rate, audio_path)
+
+    # Transcreve o áudio
+    transcription = transcribe_audio(audio_path)
+
+    print(transcription)
+
+    # Envia a transcrição de volta ao cliente
+    response = json.dumps({"text": transcription})
+    client_socket.sendall(len(response).to_bytes(4, byteorder='big'))
+    client_socket.sendall(response.encode('utf-8'))
+
+    client_socket.close()
+    print(f"Conexão com {client_address} encerrada.")
+
+
 
 if __name__ == '__main__':
     start_server()

@@ -24,9 +24,9 @@
 #define ADC_CLOCK_DIV 96.f
 //#define ADC_CLOCK_DIV 3000.f  //novo teste
 
-//#define SAMPLES 200 // Número de amostras que serão feitas do ADC.
+#define SAMPLES 200 // Número de amostras que serão feitas do ADC.
 
-#define SAMPLES 80000
+//#define SAMPLES 80000
 
 #define ADC_ADJUST(x) (x * 3.3f / (1 << 12u) - 1.65f) // Ajuste do valor do ADC para Volts.
 #define ADC_MAX 3.3f
@@ -36,9 +36,13 @@
 #define LED_PIN 7
 #define LED_COUNT 25
 
-#define BUFFER_SIZE 1024 
+//#define BUFFER_SIZE 1024 //valor antigo
 
+#define BUFFER_SIZE 2048
+
+//#define BUFFER_SIZE (SAMPLES * 16 + 32)
 //#define BUFFER_SIZE 510000
+
 
 #define abs(x) ((x < 0) ? (-x) : (x))
 
@@ -73,6 +77,17 @@ void sample_mic() {
   
   // Acabou a leitura, desliga o ADC de novo.
   adc_run(false);
+
+  for (size_t i = 0; i < SAMPLES; i++) {
+        float adc_voltage = adc_buffer[i] * (3.3f / 4096.0f);  // Converte o valor do ADC para tensão.
+        //float amplitude = adc_voltage - 1.65f;                // Centraliza em torno de 0V.
+        float amplitude = adc_voltage;
+        int16_t audio_sample = (int16_t)(amplitude / 3.3f * 32767.0f); // Converte para escala de áudio.
+
+        // Substitui os valores no buffer original (ou use outro buffer, se preferir).
+        adc_buffer[i] = audio_sample;
+    }
+
 }
 
 /**
@@ -121,76 +136,12 @@ static err_t sent_callback(void *arg, struct tcp_pcb *tpcb, u16_t len) {
 }
 
 static err_t connect_callback(void *arg, struct tcp_pcb *tpcb, err_t err) {
-    
-    printf("to no connect callback\n");
-    uint16_t *data = (uint16_t *)arg;
-    size_t len = SAMPLES;
-
-
-    // Serializar os dados como JSON
-    char json_buffer[BUFFER_SIZE];
-    snprintf(json_buffer, BUFFER_SIZE, "{\"audio\":[");
-    for (size_t i = 0; i < len; ++i) {
-        char sample[16];
-        snprintf(sample, sizeof(sample), "%d%s", data[i], (i == len - 1) ? "]}" : ",");
-        strncat(json_buffer, sample, sizeof(json_buffer) - strlen(json_buffer) - 1);
+    if (err == ERR_OK) {
+        printf("Conexão estabelecida com sucesso!\n");
+    } else {
+        printf("Erro durante a conexão: %d\n", err);
     }
-
-    // Calcular o tamanho do JSON
-    size_t json_len = strlen(json_buffer);
-
-    // Criar um buffer para os dados a serem enviados
-    char *send_buffer = malloc(4 + json_len); // 4 bytes para o tamanho + JSON
-    if (send_buffer == NULL) {
-        printf("Erro ao alocar memória para o buffer.\n");
-        return ERR_MEM;
-    }
-
-    // Adicionar o tamanho do JSON (4 bytes) no início
-    send_buffer[0] = (json_len >> 24) & 0xFF;
-    send_buffer[1] = (json_len >> 16) & 0xFF;
-    send_buffer[2] = (json_len >> 8) & 0xFF;
-    send_buffer[3] = json_len & 0xFF;
-
-    // Copiar o JSON para o buffer
-    memcpy(send_buffer + 4, json_buffer, json_len);
-
-    // Enviar os dados
-    err_t write_err = tcp_write(tpcb, send_buffer, 4 + json_len, TCP_WRITE_FLAG_COPY);
-    if (write_err != ERR_OK) {
-        printf("Erro ao enviar dados: %d\n", write_err);
-        free(send_buffer);
-        return write_err;
-    }
-
-    printf("JSON enviado: %s\n", send_buffer);
-
-    tcp_output(tpcb);
-    free(send_buffer);
-
-    // Configurar callbacks adicionais
-    tcp_recv(tpcb, recv_callback);
-    tcp_sent(tpcb, sent_callback);
-
     return ERR_OK;
-
-
-
-    /*char buffer[BUFFER_SIZE];
-    snprintf(buffer, BUFFER_SIZE, "{\"data\":[");
-    for (size_t i = 0; i < len; ++i) {
-        char sample[16];
-        snprintf(sample, sizeof(sample), "%d%s", data[i], (i == len - 1) ? "]}" : ",");
-        strncat(buffer, sample, sizeof(buffer) - strlen(buffer) - 1);
-    }
-
-    tcp_write(tpcb, buffer, strlen(buffer), TCP_WRITE_FLAG_COPY);
-    tcp_output(tpcb);
-
-    // Definir callbacks adicionais
-    tcp_recv(tpcb, recv_callback);
-    tcp_sent(tpcb, sent_callback);
-    return ERR_OK;*/
 }
 
 
@@ -202,73 +153,86 @@ static void error_callback(void *arg, err_t err) {
 void send_to_server(uint16_t *data, size_t len) {
     ip_addr_t server_ip;
     IP4_ADDR(&server_ip, 192, 168, 1, 193); // IP do servidor
+    static bool is_connected = false; 
 
-
-    if (client_pcb != NULL) {
-      printf("PCB antigo encontrado. Fechando...\n");
-      tcp_close(client_pcb);
-      client_pcb = NULL;
-    }
-
-
-    client_pcb = tcp_new();
-    if (client_pcb == NULL) {
-        printf("Erro ao criar PCB.\n");
-        return;
-    }
-
-    printf("PCB criado com sucesso.\n");
-
-    tcp_arg(client_pcb, data); // Passar dados para o callback
-    tcp_err(client_pcb, error_callback);
-
-    err_t err = tcp_connect(client_pcb, &server_ip, SERVER_PORT, connect_callback);
-    if (err != ERR_OK) {
-        printf("Erro ao iniciar conexão: %d\n", err);
-        tcp_close(client_pcb);
-    }
-
-   
-
-    //tcp_close(client_pcb);
-    //client_pcb = NULL;
-    
-    
-    /*tcp_err(client_pcb, error_callback);
-
-    err_t err = tcp_connect(client_pcb, &server_ip, SERVER_PORT, connect_callback);
-    if (err != ERR_OK) {
-        printf("Erro ao iniciar conexão: %d\n", err);
+    if(!is_connected)
+    {
+        if (client_pcb != NULL) {
+        printf("PCB antigo encontrado. Fechando...\n");
         tcp_close(client_pcb);
         client_pcb = NULL;
-        return;
+        }
+
+
+        client_pcb = tcp_new();
+        if (client_pcb == NULL) {
+            printf("Erro ao criar PCB.\n");
+            return;
+        }
+
+        printf("PCB criado com sucesso.\n");
+
+        tcp_arg(client_pcb, data); // Passar dados para o callback
+        tcp_err(client_pcb, error_callback);
+
+        err_t err = tcp_connect(client_pcb, &server_ip, SERVER_PORT, connect_callback);
+        if (err != ERR_OK) {
+            printf("Erro ao iniciar conexão: %d\n", err);
+            tcp_close(client_pcb);
+        }
+
+        is_connected = true;
+    }
+   
+    else
+    {
+        printf("envio de dados\n");
+
+        // Obter os dados de áudio e seu comprimento
+        //uint16_t *data = (uint16_t *)arg;
+        size_t len = SAMPLES;
+
+        // Calcular o tamanho total em bytes dos dados de áudio (2 bytes por amostra)
+        size_t data_size = len * sizeof(uint16_t);
+
+        // Criar um buffer para os dados a serem enviados
+        char *send_buffer = malloc(4 + data_size); // 4 bytes para o tamanho + dados binários
+        if (send_buffer == NULL) {
+            printf("Erro ao alocar memória para o buffer.\n");
+            return;
+        }
+
+        // Adicionar o tamanho dos dados (4 bytes no início)
+        send_buffer[0] = (data_size >> 24) & 0xFF;
+        send_buffer[1] = (data_size >> 16) & 0xFF;
+        send_buffer[2] = (data_size >> 8) & 0xFF;
+        send_buffer[3] = data_size & 0xFF;
+
+        // Copiar os dados de áudio para o buffer após os 4 bytes iniciais
+        memcpy(send_buffer + 4, data, data_size);
+
+        // Enviar os dados
+        err_t write_err = tcp_write(client_pcb, send_buffer, 4 + data_size, TCP_WRITE_FLAG_COPY);
+        if (write_err != ERR_OK) {
+            printf("Erro ao enviar dados: %d\n", write_err);
+            free(send_buffer);
+            return;
+        }
+
+        printf("Dados enviados (%lu bytes).\n", 4 + data_size);
+
+        // Garantir que os dados sejam transmitidos
+        tcp_output(client_pcb);
+        free(send_buffer);
+
+        // Configurar callbacks adicionais
+        tcp_recv(client_pcb, recv_callback);
+        tcp_sent(client_pcb, sent_callback);
+
+    
     }
 
-    // Criar o payload JSON
-    char payload[BUFFER_SIZE];
-    snprintf(payload, BUFFER_SIZE, "{\"audio\":[");
-    for (size_t i = 0; i < len; ++i) {
-        char sample[16];
-        snprintf(sample, sizeof(sample), "%d%s", data[i], (i == len - 1) ? "]}" : ",");
-        strncat(payload, sample, sizeof(payload) - strlen(payload) - 1);
-    }
-
-    // Montar a requisição HTTP
-    char request[BUFFER_SIZE];
-    snprintf(request, BUFFER_SIZE,
-             "POST /upload HTTP/1.1\r\n"
-             "Host: %s:%d\r\n"
-             "Content-Type: application/json\r\n"
-             "Content-Length: %d\r\n"
-             "\r\n"
-             "%s",
-             SERVER_IP, SERVER_PORT, strlen(payload), payload);
-
-    // Enviar a requisição HTTP pelo TCP
-    tcp_write(client_pcb, request, strlen(request), TCP_WRITE_FLAG_COPY);
-    tcp_output(client_pcb);
-
-    printf("Dados enviados ao servidor:\n%s\n", request);*/
+    
 
 }
 
@@ -345,6 +309,9 @@ int main() {
 
   printf("\n----\nIniciando loop...\n----\n");
 
+
+  
+
   while (true) {
 
     // Realiza uma amostragem do microfone.
@@ -374,8 +341,8 @@ int main() {
         tcp_close(test_pcb);
     }*/
 
-
-    send_to_server(adc_buffer, SAMPLES);
+     send_to_server(adc_buffer, SAMPLES);
+    
     sleep_ms(1000);
   }
 

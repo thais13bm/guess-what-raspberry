@@ -1,9 +1,20 @@
 #include <stdio.h>
 #include <math.h>
+#include <string.h>
 #include "pico/stdlib.h"
 #include "hardware/adc.h"
 #include "hardware/dma.h"
-#include "C:\Users\clien\Documents\embarca_tech\BitDogLab-C\microphone_dma\neopixel.c"
+#include "neopixel.c"
+#include "pico/cyw43_arch.h"   //e se eu botar o path completo?
+//#include "pico/cyw43_arch_lwip.h"  //acho que esse real nao tem
+//#include "lwip/sockets.h"
+//#include "lwip/inet.h"
+#include "lwip/tcp.h"
+
+
+
+#define SERVER_IP "192.168.1.193" // Substitua pelo IP do servidor Flask
+#define SERVER_PORT 5000
 
 // Pino e canal do microfone no ADC.
 #define MIC_CHANNEL 2
@@ -11,7 +22,12 @@
 
 // Parâmetros e macros do ADC.
 #define ADC_CLOCK_DIV 96.f
+//#define ADC_CLOCK_DIV 3000.f  //novo teste
+
 #define SAMPLES 200 // Número de amostras que serão feitas do ADC.
+
+//#define SAMPLES 80000
+
 #define ADC_ADJUST(x) (x * 3.3f / (1 << 12u) - 1.65f) // Ajuste do valor do ADC para Volts.
 #define ADC_MAX 3.3f
 #define ADC_STEP (3.3f/5.f) // Intervalos de volume do microfone.
@@ -19,6 +35,14 @@
 // Pino e número de LEDs da matriz de LEDs.
 #define LED_PIN 7
 #define LED_COUNT 25
+
+//#define BUFFER_SIZE 1024 //valor antigo
+
+#define BUFFER_SIZE 2048
+
+//#define BUFFER_SIZE (SAMPLES * 16 + 32)
+//#define BUFFER_SIZE 510000
+
 
 #define abs(x) ((x < 0) ? (-x) : (x))
 
@@ -28,21 +52,220 @@ dma_channel_config dma_cfg;
 
 // Buffer de amostras do ADC.
 uint16_t adc_buffer[SAMPLES];
+static struct tcp_pcb *client_pcb;
 
-void sample_mic();
-float mic_power();
-uint8_t get_intensity(float v);
+
+//declaracao de funcoes
+
+/**
+ * Realiza as leituras do ADC e armazena os valores no buffer.
+ */
+void sample_mic() {
+  adc_fifo_drain(); // Limpa o FIFO do ADC.
+  adc_run(false); // Desliga o ADC (se estiver ligado) para configurar o DMA.
+
+  dma_channel_configure(dma_channel, &dma_cfg,
+    adc_buffer, // Escreve no buffer.
+    &(adc_hw->fifo), // Lê do ADC.
+    SAMPLES, // Faz SAMPLES amostras.
+    true // Liga o DMA.
+  );
+
+  // Liga o ADC e espera acabar a leitura.
+  adc_run(true);
+  dma_channel_wait_for_finish_blocking(dma_channel);
+  
+  // Acabou a leitura, desliga o ADC de novo.
+  adc_run(false);
+
+  for (size_t i = 0; i < SAMPLES; i++) {
+        float adc_voltage = adc_buffer[i] * (3.3f / 4096.0f);  // Converte o valor do ADC para tensão.
+        //float amplitude = adc_voltage - 1.65f;                // Centraliza em torno de 0V.
+        float amplitude = adc_voltage;
+        int16_t audio_sample = (int16_t)(amplitude / 3.3f * 32767.0f); // Converte para escala de áudio.
+
+        // Substitui os valores no buffer original (ou use outro buffer, se preferir).
+        adc_buffer[i] = audio_sample;
+    }
+
+}
+
+/**
+ * Calcula a potência média das leituras do ADC. (Valor RMS)
+ */
+float mic_power() {
+  float avg = 0.f;
+
+  for (uint i = 0; i < SAMPLES; ++i)
+    avg += adc_buffer[i] * adc_buffer[i];
+  
+  avg /= SAMPLES;
+  return sqrt(avg);
+}
+
+/**
+ * Calcula a intensidade do volume registrado no microfone, de 0 a 4, usando a tensão.
+ */
+uint8_t get_intensity(float v) {
+  uint count = 0;
+
+  while ((v -= ADC_STEP/20) > 0.f)
+    ++count;
+  
+  return count;
+}
+
+
+// Callback when data is received
+static err_t recv_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
+    if (p == NULL) {
+        // Connection closed
+        tcp_close(tpcb);
+    } else {
+        // Process received data
+        tcp_recved(tpcb, p->len); // Acknowledge data reception
+        pbuf_free(p); // Free the buffer
+    }
+    return ERR_OK;
+}
+
+// Callback when data is sent
+static err_t sent_callback(void *arg, struct tcp_pcb *tpcb, u16_t len) {
+    printf("Data sent successfully.\n");
+    return ERR_OK;
+}
+
+static err_t connect_callback(void *arg, struct tcp_pcb *tpcb, err_t err) {
+    if (err == ERR_OK) {
+        printf("Conexão estabelecida com sucesso!\n");
+    } else {
+        printf("Erro durante a conexão: %d\n", err);
+    }
+    return ERR_OK;
+}
+
+
+// Callback when an error occurs
+static void error_callback(void *arg, err_t err) {
+    printf("Connection error: %d\n", err);
+}
+
+void send_to_server(uint16_t *data, size_t len) {
+    ip_addr_t server_ip;
+    IP4_ADDR(&server_ip, 192, 168, 1, 193); // IP do servidor
+    static bool is_connected = false; 
+
+    if(!is_connected)
+    {
+        if (client_pcb != NULL) {
+        printf("PCB antigo encontrado. Fechando...\n");
+        tcp_close(client_pcb);
+        client_pcb = NULL;
+        }
+
+
+        client_pcb = tcp_new();
+        if (client_pcb == NULL) {
+            printf("Erro ao criar PCB.\n");
+            return;
+        }
+
+        printf("PCB criado com sucesso.\n");
+
+        tcp_arg(client_pcb, data); // Passar dados para o callback
+        tcp_err(client_pcb, error_callback);
+
+        err_t err = tcp_connect(client_pcb, &server_ip, SERVER_PORT, connect_callback);
+        if (err != ERR_OK) {
+            printf("Erro ao iniciar conexão: %d\n", err);
+            tcp_close(client_pcb);
+        }
+
+        is_connected = true;
+    }
+   
+    else
+    {
+        printf("envio de dados\n");
+
+        // Obter os dados de áudio e seu comprimento
+        //uint16_t *data = (uint16_t *)arg;
+        size_t len = SAMPLES;
+
+        // Calcular o tamanho total em bytes dos dados de áudio (2 bytes por amostra)
+        size_t data_size = len * sizeof(uint16_t);
+
+        // Criar um buffer para os dados a serem enviados
+        char *send_buffer = malloc(4 + data_size); // 4 bytes para o tamanho + dados binários
+        if (send_buffer == NULL) {
+            printf("Erro ao alocar memória para o buffer.\n");
+            return;
+        }
+
+        // Adicionar o tamanho dos dados (4 bytes no início)
+        send_buffer[0] = (data_size >> 24) & 0xFF;
+        send_buffer[1] = (data_size >> 16) & 0xFF;
+        send_buffer[2] = (data_size >> 8) & 0xFF;
+        send_buffer[3] = data_size & 0xFF;
+
+        // Copiar os dados de áudio para o buffer após os 4 bytes iniciais
+        memcpy(send_buffer + 4, data, data_size);
+
+        // Enviar os dados
+        err_t write_err = tcp_write(client_pcb, send_buffer, 4 + data_size, TCP_WRITE_FLAG_COPY);
+        if (write_err != ERR_OK) {
+            printf("Erro ao enviar dados: %d\n", write_err);
+            free(send_buffer);
+            return;
+        }
+
+        printf("Dados enviados (%lu bytes).\n", 4 + data_size);
+
+        // Garantir que os dados sejam transmitidos
+        tcp_output(client_pcb);
+        free(send_buffer);
+
+        // Configurar callbacks adicionais
+        tcp_recv(client_pcb, recv_callback);
+        tcp_sent(client_pcb, sent_callback);
+
+    
+    }
+
+    
+
+}
+
+
+
 
 int main() {
   stdio_init_all();
 
   // Delay para o usuário abrir o monitor serial...
-  sleep_ms(5000);
+  sleep_ms(1000);
+
+  // Configurar Wi-Fi
+  if (cyw43_arch_init()) {
+      printf("Falha ao inicializar Wi-Fi.\n");
+      return -1;
+  }
+  cyw43_arch_enable_sta_mode();
+
+  const char *ssid = "LIVE TIM_7660_2G";
+  const char *password = "Z248ZmXH";
+  printf("Conectando ao Wi-Fi...\n");
+  if (cyw43_arch_wifi_connect_timeout_ms(ssid, password, CYW43_AUTH_WPA2_AES_PSK, 10000)) {
+      printf("Falha ao conectar ao Wi-Fi.\n");
+      return -1;
+  }
+  printf("Wi-Fi conectado!\n");
+
 
   // Preparação da matriz de LEDs.
-  printf("Preparando NeoPixel...");
+  //printf("Preparando NeoPixel...");
   
-  npInit(LED_PIN, LED_COUNT);
+  //npInit(LED_PIN, LED_COUNT);
 
   // Preparação do ADC.
   printf("Preparando ADC...\n");
@@ -85,137 +308,88 @@ int main() {
   printf("Configuracoes completas!\n");
 
   printf("\n----\nIniciando loop...\n----\n");
+
+
+  
+
   while (true) {
 
     // Realiza uma amostragem do microfone.
     sample_mic();
 
     // Pega a potência média da amostragem do microfone.
-    float avg = mic_power();
+    /*float avg = mic_power();
     avg = 2.f * abs(ADC_ADJUST(avg)); // Ajusta para intervalo de 0 a 3.3V. (apenas magnitude, sem sinal)
 
     uint intensity = get_intensity(avg); // Calcula intensidade a ser mostrada na matriz de LEDs.
 
     // Limpa a matriz de LEDs.
-    npClear();
+    npClear();*/
+    //printf("%d",adc_buffer[0]);
 
-    // A depender da intensidade do som, acende LEDs específicos.
-    switch (intensity) {
-      case 0: break; // Se o som for muito baixo, não acende nada.
-      case 1:
-        npSetLED(12, 0, 0, 80); // Acende apenas o centro.
-        break;
-      case 2:
-        npSetLED(12, 0, 0, 120); // Acente o centro.
-
-        // Primeiro anel.
-        npSetLED(7, 0, 0, 80);
-        npSetLED(11, 0, 0, 80);
-        npSetLED(13, 0, 0, 80);
-        npSetLED(17, 0, 0, 80);
-        break;
-      case 3:
-        // Centro.
-        npSetLED(12, 60, 60, 0);
-
-        // Primeiro anel.
-        npSetLED(7, 0, 0, 120);
-        npSetLED(11, 0, 0, 120);
-        npSetLED(13, 0, 0, 120);
-        npSetLED(17, 0, 0, 120);
-
-        // Segundo anel.
-        npSetLED(2, 0, 0, 80);
-        npSetLED(6, 0, 0, 80);
-        npSetLED(8, 0, 0, 80);
-        npSetLED(10, 0, 0, 80);
-        npSetLED(14, 0, 0, 80);
-        npSetLED(16, 0, 0, 80);
-        npSetLED(18, 0, 0, 80);
-        npSetLED(22, 0, 0, 80);
-        break;
-      case 4:
-        // Centro.
-        npSetLED(12, 80, 0, 0);
-
-        // Primeiro anel.
-        npSetLED(7, 60, 60, 0);
-        npSetLED(11, 60, 60, 0);
-        npSetLED(13, 60, 60, 0);
-        npSetLED(17, 60, 60, 0);
-
-        // Segundo anel.
-        npSetLED(2, 0, 0, 120);
-        npSetLED(6, 0, 0, 120);
-        npSetLED(8, 0, 0, 120);
-        npSetLED(10, 0, 0, 120);
-        npSetLED(14, 0, 0, 120);
-        npSetLED(16, 0, 0, 120);
-        npSetLED(18, 0, 0, 120);
-        npSetLED(22, 0, 0, 120);
-
-        // Terceiro anel.
-        npSetLED(1, 0, 0, 80);
-        npSetLED(3, 0, 0, 80);
-        npSetLED(5, 0, 0, 80);
-        npSetLED(9, 0, 0, 80);
-        npSetLED(15, 0, 0, 80);
-        npSetLED(19, 0, 0, 80);
-        npSetLED(21, 0, 0, 80);
-        npSetLED(23, 0, 0, 80);
-        break;
-    }
-    // Atualiza a matriz.
-    npWrite();
 
     // Envia a intensidade e a média das leituras do ADC por serial.
-    printf("%2d %8.4f\r", intensity, avg);
+    //printf("%2d %8.4f\r", intensity, avg);
+
+    /*ip_addr_t test_ip;
+    IP4_ADDR(&test_ip, 192, 168, 1, 193); // IP do servidor
+    struct tcp_pcb *test_pcb = tcp_new();
+    if (test_pcb == NULL) {
+        printf("Falha ao criar PCB de teste.\n");
+    } else {
+        printf("PCB de teste criado com sucesso.\n");
+        tcp_close(test_pcb);
+    }*/
+
+     send_to_server(adc_buffer, SAMPLES);
+    
+    sleep_ms(1000);
   }
+
+  cyw43_arch_deinit();
+  return 0;
+
 }
 
-/**
- * Realiza as leituras do ADC e armazena os valores no buffer.
- */
-void sample_mic() {
-  adc_fifo_drain(); // Limpa o FIFO do ADC.
-  adc_run(false); // Desliga o ADC (se estiver ligado) para configurar o DMA.
 
-  dma_channel_configure(dma_channel, &dma_cfg,
-    adc_buffer, // Escreve no buffer.
-    &(adc_hw->fifo), // Lê do ADC.
-    SAMPLES, // Faz SAMPLES amostras.
-    true // Liga o DMA.
-  );
 
-  // Liga o ADC e espera acabar a leitura.
-  adc_run(true);
-  dma_channel_wait_for_finish_blocking(dma_channel);
-  
-  // Acabou a leitura, desliga o ADC de novo.
-  adc_run(false);
-}
 
-/**
- * Calcula a potência média das leituras do ADC. (Valor RMS)
- */
-float mic_power() {
-  float avg = 0.f;
 
-  for (uint i = 0; i < SAMPLES; ++i)
-    avg += adc_buffer[i] * adc_buffer[i];
-  
-  avg /= SAMPLES;
-  return sqrt(avg);
-}
+/*void send_to_server(uint16_t *data, size_t len) {
+    int sock;
+    struct sockaddr_in server_addr;
 
-/**
- * Calcula a intensidade do volume registrado no microfone, de 0 a 4, usando a tensão.
- */
-uint8_t get_intensity(float v) {
-  uint count = 0;
+    // Configurar o endereço do servidor
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(SERVER_PORT);
+    server_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
 
-  while ((v -= ADC_STEP/20) > 0.f)
-    ++count;
-  
-  return count;
-}
+    // Criar o socket
+    sock = lwip_socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) {
+        printf("Erro ao criar socket\n");
+        return;
+    }
+
+    // Conectar ao servidor
+    if (lwip_connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        printf("Erro ao conectar ao servidor\n");
+        lwip_close(sock);
+        return;
+    }
+
+    // Criar a string de dados em JSON
+    char buffer[BUFFER_SIZE];
+    snprintf(buffer, BUFFER_SIZE, "{\"data\":[");
+    for (size_t i = 0; i < len; ++i) {
+        char sample[16];
+        snprintf(sample, sizeof(sample), "%d%s", data[i], (i == len - 1) ? "]}" : ",");
+        strncat(buffer, sample, sizeof(buffer) - strlen(buffer) - 1);
+    }
+
+    // Enviar dados ao servidor
+    lwip_write(sock, buffer, strlen(buffer));
+    lwip_close(sock);
+    printf("Dados enviados para o servidor.\n");
+}*/

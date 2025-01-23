@@ -51,10 +51,12 @@ if (EXISTS ${picoVscode})
     include(${picoVscode})
 endif()
 # ====================================================================================
-set(PICO_BOARD pico CACHE STRING "Board type")
+set(PICO_BOARD pico_w)
 
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
+
+
 
 project(microphone_dma C CXX ASM)
 
@@ -75,13 +77,22 @@ pico_generate_pio_header(microphone_dma ${CMAKE_CURRENT_LIST_DIR}/ws2818b.pio)
 pico_enable_stdio_uart(microphone_dma 0)
 pico_enable_stdio_usb(microphone_dma 1)
 
+
+
+
 # Add the standard library to the build
 target_link_libraries(microphone_dma
+        
         pico_stdlib)
 
 # Add the standard include files to the build
 target_include_directories(microphone_dma PRIVATE
   ${CMAKE_CURRENT_LIST_DIR}
+
+  ${PICO_SDK_PATH}/lib/lwip/contrib/ports/freertos/include
+   # ${PICO_SDK_PATH}/lib/lwip/contrib/ports/unix/port/include
+   # ${PICO_SDK_PATH}/lib/lwip/contrib/ports/win32/include
+   # ${PICO_SDK_PATH}/lib/lwip/test/unit/arch
 )
 
 # Add any user requested libraries
@@ -91,7 +102,17 @@ target_link_libraries(microphone_dma
         hardware_adc
         hardware_pio
         hardware_clocks
+        #pico_cyw43_arch_lwip_sys_freertos
+        #FreeRTOS-Kernel-Heap4
+        #pico_async_context_freertos
+        pico_cyw43_arch_lwip_threadsafe_background
+        #pico_cyw43_arch_lwip_poll
         )
+
+
+#if (PICO_CYW43_SUPPORTED)
+ #   add_compile_definitions(CYW43_LWIP=1)
+#endif()       
 
 pico_add_extra_outputs(microphone_dma)
 

@@ -55,6 +55,8 @@ def transcribe_audio(audio_path):
     result_json = json.loads(result)
     transcription = result_json.get("text", "")
 
+    print(transcription)
+
     return transcription
 
 if __name__ == '__main__':

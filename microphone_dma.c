@@ -4,14 +4,14 @@
 #include "pico/stdlib.h"
 #include "hardware/adc.h"
 #include "hardware/dma.h"
-#include "neopixel.c"
+//#include "neopixel.c"
 #include "pico/cyw43_arch.h"   //e se eu botar o path completo?
-//#include "pico/cyw43_arch_lwip.h"  //acho que esse real nao tem
-//#include "lwip/sockets.h"
-//#include "lwip/inet.h"
+
 #include "lwip/tcp.h"
+#include <stdint.h>
 
-
+#define WAV_SAMPLE_RATE  22050
+#define WAV_PWM_COUNT   (125000000 / WAV_SAMPLE_RATE)
 
 #define SERVER_IP "192.168.1.193" // Substitua pelo IP do servidor Flask
 #define SERVER_PORT 5000
@@ -20,11 +20,22 @@
 #define MIC_CHANNEL 2
 #define MIC_PIN (26 + MIC_CHANNEL)
 
+
+
+
+
 // Parâmetros e macros do ADC.
-#define ADC_CLOCK_DIV 96.f
+#define ADC_CLOCK_DIV 2177.28
+
+//#define ADC_CLOCK_DIV 96.f
 //#define ADC_CLOCK_DIV 3000.f  //novo teste
 
-#define SAMPLES 200 // Número de amostras que serão feitas do ADC.
+#define CHUNK_SIZE 1024
+#define AUDIO_PERIOD    2
+#define SAMPLES      (WAV_SAMPLE_RATE * AUDIO_PERIOD)  //acho que nao tem necessidade, ja que ainda quero fazer isso no servidor mesmo
+
+
+//#define SAMPLES 400 // Número de amostras que serão feitas do ADC.
 
 //#define SAMPLES 80000
 
@@ -36,15 +47,8 @@
 #define LED_PIN 7
 #define LED_COUNT 25
 
-//#define BUFFER_SIZE 1024 //valor antigo
-
-#define BUFFER_SIZE 2048
-
-//#define BUFFER_SIZE (SAMPLES * 16 + 32)
-//#define BUFFER_SIZE 510000
 
 
-#define abs(x) ((x < 0) ? (-x) : (x))
 
 // Canal e configurações do DMA
 uint dma_channel;
@@ -56,6 +60,7 @@ static struct tcp_pcb *client_pcb;
 
 
 //declaracao de funcoes
+
 
 /**
  * Realiza as leituras do ADC e armazena os valores no buffer.
@@ -79,10 +84,8 @@ void sample_mic() {
   adc_run(false);
 
   for (size_t i = 0; i < SAMPLES; i++) {
-        float adc_voltage = adc_buffer[i] * (3.3f / 4096.0f);  // Converte o valor do ADC para tensão.
-        //float amplitude = adc_voltage - 1.65f;                // Centraliza em torno de 0V.
-        float amplitude = adc_voltage;
-        int16_t audio_sample = (int16_t)(amplitude / 3.3f * 32767.0f); // Converte para escala de áudio.
+        
+        int16_t audio_sample = (int16_t)((adc_buffer[i] * 32) - 32768); // Converte para escala de áudio.
 
         // Substitui os valores no buffer original (ou use outro buffer, se preferir).
         adc_buffer[i] = audio_sample;
@@ -90,30 +93,36 @@ void sample_mic() {
 
 }
 
-/**
- * Calcula a potência média das leituras do ADC. (Valor RMS)
- */
-float mic_power() {
-  float avg = 0.f;
+void sample_mic_no_dma()
+{
+   unsigned long SampleCount = 0;
+   unsigned long long SamplePeriod;
 
-  for (uint i = 0; i < SAMPLES; ++i)
-    avg += adc_buffer[i] * adc_buffer[i];
   
-  avg /= SAMPLES;
-  return sqrt(avg);
+   SampleCount = 0;
+  
+  /**************************************************************/
+ /* Fill audio buffer with values read from the A/D converter. */
+/**************************************************************/
+   SamplePeriod = time_us_64() + (1000000 / WAV_SAMPLE_RATE);
+   while (SampleCount < SAMPLES)
+   {
+  /***************************/
+ /* Read values @ 22050 Hz. */
+/***************************/
+      while(time_us_64() < SamplePeriod);
+      SamplePeriod = time_us_64() + (1000000 / WAV_SAMPLE_RATE);
+  /****************************************************/
+ /* Read the current audio level from A/D converter. */
+/****************************************************/
+      adc_buffer[SampleCount++] = (int16_t)((adc_read() * 32) - 32768);
+
+   
+   }
 }
 
-/**
- * Calcula a intensidade do volume registrado no microfone, de 0 a 4, usando a tensão.
- */
-uint8_t get_intensity(float v) {
-  uint count = 0;
 
-  while ((v -= ADC_STEP/20) > 0.f)
-    ++count;
-  
-  return count;
-}
+
 
 
 // Callback when data is received
@@ -190,7 +199,7 @@ void send_to_server(uint16_t *data, size_t len) {
 
         // Obter os dados de áudio e seu comprimento
         //uint16_t *data = (uint16_t *)arg;
-        size_t len = SAMPLES;
+        //size_t len = SAMPLES;
 
         // Calcular o tamanho total em bytes dos dados de áudio (2 bytes por amostra)
         size_t data_size = len * sizeof(uint16_t);
@@ -262,10 +271,6 @@ int main() {
   printf("Wi-Fi conectado!\n");
 
 
-  // Preparação da matriz de LEDs.
-  //printf("Preparando NeoPixel...");
-  
-  //npInit(LED_PIN, LED_COUNT);
 
   // Preparação do ADC.
   printf("Preparando ADC...\n");
@@ -274,13 +279,13 @@ int main() {
   adc_init();
   adc_select_input(MIC_CHANNEL);
 
-  adc_fifo_setup(
+  /*adc_fifo_setup(
     true, // Habilitar FIFO
     true, // Habilitar request de dados do DMA
     1, // Threshold para ativar request DMA é 1 leitura do ADC
     false, // Não usar bit de erro
     false // Não fazer downscale das amostras para 8-bits, manter 12-bits.
-  );
+  );*/
 
   adc_set_clkdiv(ADC_CLOCK_DIV);
 
@@ -289,7 +294,7 @@ int main() {
   printf("Preparando DMA...");
 
   // Tomando posse de canal do DMA.
-  dma_channel = dma_claim_unused_channel(true);
+  /*dma_channel = dma_claim_unused_channel(true);
 
   // Configurações do DMA.
   dma_cfg = dma_channel_get_default_config(dma_channel);
@@ -299,10 +304,10 @@ int main() {
   channel_config_set_write_increment(&dma_cfg, true); // Habilita incremento do ponteiro de escrita (escrevemos em um array/buffer)
   
   channel_config_set_dreq(&dma_cfg, DREQ_ADC); // Usamos a requisição de dados do ADC
-
+*/
   // Amostragem de teste.
   printf("Amostragem de teste...\n");
-  sample_mic();
+  //sample_mic();
 
 
   printf("Configuracoes completas!\n");
@@ -310,40 +315,38 @@ int main() {
   printf("\n----\nIniciando loop...\n----\n");
 
 
-  
+  sleep_ms(5000);
+
+  printf("começando a gravar");
+
+  sample_mic_no_dma();
+
+  printf("termino da gravacao");
+
+  // mandando ao servidor
+
+   for (int i = 0; i < SAMPLES; i += CHUNK_SIZE) {
+        // Calcular o tamanho do chunk atual (o último pode ser menor que CHUNK_SIZE)
+        size_t current_chunk_size = ((i + CHUNK_SIZE) <= SAMPLES) 
+                                    ? CHUNK_SIZE 
+                                    : (SAMPLES - i);
+
+        // Passar o ponteiro deslocado para a função send_to_server
+        send_to_server(&adc_buffer[i], current_chunk_size);
+        sleep_ms(1000);
+    }
+
 
   while (true) {
 
     // Realiza uma amostragem do microfone.
-    sample_mic();
+    //sample_mic_no_dma();
 
-    // Pega a potência média da amostragem do microfone.
-    /*float avg = mic_power();
-    avg = 2.f * abs(ADC_ADJUST(avg)); // Ajusta para intervalo de 0 a 3.3V. (apenas magnitude, sem sinal)
-
-    uint intensity = get_intensity(avg); // Calcula intensidade a ser mostrada na matriz de LEDs.
-
-    // Limpa a matriz de LEDs.
-    npClear();*/
-    //printf("%d",adc_buffer[0]);
-
-
-    // Envia a intensidade e a média das leituras do ADC por serial.
-    //printf("%2d %8.4f\r", intensity, avg);
-
-    /*ip_addr_t test_ip;
-    IP4_ADDR(&test_ip, 192, 168, 1, 193); // IP do servidor
-    struct tcp_pcb *test_pcb = tcp_new();
-    if (test_pcb == NULL) {
-        printf("Falha ao criar PCB de teste.\n");
-    } else {
-        printf("PCB de teste criado com sucesso.\n");
-        tcp_close(test_pcb);
-    }*/
-
-     send_to_server(adc_buffer, SAMPLES);
     
-    sleep_ms(1000);
+
+     //send_to_server(adc_buffer, SAMPLES);
+    
+    //sleep_ms(100);
   }
 
   cyw43_arch_deinit();
@@ -353,43 +356,3 @@ int main() {
 
 
 
-
-
-/*void send_to_server(uint16_t *data, size_t len) {
-    int sock;
-    struct sockaddr_in server_addr;
-
-    // Configurar o endereço do servidor
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(SERVER_PORT);
-    server_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
-
-    // Criar o socket
-    sock = lwip_socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) {
-        printf("Erro ao criar socket\n");
-        return;
-    }
-
-    // Conectar ao servidor
-    if (lwip_connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-        printf("Erro ao conectar ao servidor\n");
-        lwip_close(sock);
-        return;
-    }
-
-    // Criar a string de dados em JSON
-    char buffer[BUFFER_SIZE];
-    snprintf(buffer, BUFFER_SIZE, "{\"data\":[");
-    for (size_t i = 0; i < len; ++i) {
-        char sample[16];
-        snprintf(sample, sizeof(sample), "%d%s", data[i], (i == len - 1) ? "]}" : ",");
-        strncat(buffer, sample, sizeof(buffer) - strlen(buffer) - 1);
-    }
-
-    // Enviar dados ao servidor
-    lwip_write(sock, buffer, strlen(buffer));
-    lwip_close(sock);
-    printf("Dados enviados para o servidor.\n");
-}*/

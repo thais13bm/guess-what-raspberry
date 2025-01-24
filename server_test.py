@@ -9,7 +9,7 @@ from pydub import AudioSegment
 MODEL_PATH = "vosk-model-small-pt-0.3"  # O modelo baixado e descompactado
 
 # Caminho do arquivo de áudio local
-AUDIO_PATH = "record_out (3).wav"  # Substitua com o caminho do seu arquivo de áudio
+AUDIO_PATH = "received_audio.wav"  # Substitua com o caminho do seu arquivo de áudio
 
 # Carregar o modelo
 model = Model(MODEL_PATH)

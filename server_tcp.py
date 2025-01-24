@@ -8,8 +8,8 @@ from vosk import Model, KaldiRecognizer
 SERVER_IP = '192.168.1.193'  # Aceita conexões de qualquer IP
 SERVER_PORT = 5000
 BUFFER_SIZE = 4096  # Tamanho do buffer para receber dados
-AUDIO_DURATION = 10  # Duração do áudio em segundos
-
+AUDIO_DURATION = 3  # Duração do áudio em segundos
+TIMEOUT = 5 
 
 full_audio_data = []  # Armazena os dados de áudio completos
 total_samples = 0 
@@ -61,6 +61,9 @@ def start_server():
     client_socket, client_address = server_socket.accept()
     print(f"Cliente conectado: {client_address}")
 
+    client_socket.settimeout(TIMEOUT)  # Define o tempo de espera para 5 segundos
+
+
     while True:
         ## acho que isso aqui nao devia tar no while. porque eu so quero 1 cliente
         
@@ -95,7 +98,8 @@ def start_server():
             print(f"Dados acumulados: {total_samples} amostras")
 
             # Verifica se o áudio acumulado já atingiu 10 segundos
-            if total_samples >= 16000 * AUDIO_DURATION:
+            #if total_samples >= 22050 * AUDIO_DURATION:
+            if total_samples >= 43000:
                 print("Áudio suficiente recebido, processando...")
                 break
             
@@ -113,9 +117,11 @@ def start_server():
     # Concatena os dados de áudio acumulados
     full_audio_array = np.concatenate(full_audio_data)
 
+    np.save("audio_data.npy", full_audio_array)
+
     # Salva o áudio como WAV
     audio_path = "received_audio.wav"
-    save_audio_as_wav(full_audio_array, sample_rate, audio_path)
+    save_audio_as_wav(full_audio_array, 22050, audio_path)
 
     # Transcreve o áudio
     transcription = transcribe_audio(audio_path)

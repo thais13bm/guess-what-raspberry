@@ -9,7 +9,9 @@ SERVER_IP = '192.168.1.193'  # Aceita conexões de qualquer IP
 SERVER_PORT = 5000
 BUFFER_SIZE = 4096  # Tamanho do buffer para receber dados
 AUDIO_DURATION = 3  # Duração do áudio em segundos
-TIMEOUT = 5 
+TIMEOUT = 10 
+
+SAMPLE_RATE = 22050
 
 full_audio_data = []  # Armazena os dados de áudio completos
 total_samples = 0 
@@ -24,7 +26,7 @@ model = Model(MODEL_PATH)
 print("Modelo carregado!")
 
 # Função para salvar áudio como arquivo WAV
-def save_audio_as_wav(audio_data, sample_rate, filename="audio.wav"):
+def save_audio_as_wav(audio_data, sample_rate, filename="audios/audio.wav"):
     with wave.open(filename, 'wb') as wf:
         wf.setnchannels(1)  # Canal mono
         wf.setsampwidth(2)  # 2 bytes (16 bits) por amostra
@@ -97,12 +99,15 @@ def start_server():
 
             print(f"Dados acumulados: {total_samples} amostras")
 
-            # Verifica se o áudio acumulado já atingiu 10 segundos
-            #if total_samples >= 22050 * AUDIO_DURATION:
-            if total_samples >= 43000:
+            # Verifica se o áudio acumulado já atingiu o tempo
+            if total_samples >= SAMPLE_RATE * AUDIO_DURATION:
+            #if total_samples >= 43000:
                 print("Áudio suficiente recebido, processando...")
                 break
             
+        except socket.timeout:
+            print("Timeout atingido. Nenhum dado recebido dentro do período esperado.")
+            break  
 
         except Exception as e:
             print(f"Erro: {e}")
@@ -120,8 +125,8 @@ def start_server():
     np.save("audio_data.npy", full_audio_array)
 
     # Salva o áudio como WAV
-    audio_path = "received_audio.wav"
-    save_audio_as_wav(full_audio_array, 22050, audio_path)
+    audio_path = "audios/received_audio.wav"
+    save_audio_as_wav(full_audio_array, SAMPLE_RATE, audio_path)
 
     # Transcreve o áudio
     transcription = transcribe_audio(audio_path)

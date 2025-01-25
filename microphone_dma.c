@@ -1,9 +1,9 @@
 #include <stdio.h>
-#include <math.h>
+//#include <math.h>
 #include <string.h>
 #include "pico/stdlib.h"
 #include "hardware/adc.h"
-#include "hardware/dma.h"
+//#include "hardware/dma.h"
 //#include "neopixel.c"
 #include "pico/cyw43_arch.h"   //e se eu botar o path completo?
 
@@ -31,7 +31,7 @@
 //#define ADC_CLOCK_DIV 3000.f  //novo teste
 
 #define CHUNK_SIZE 1024
-#define AUDIO_PERIOD    2
+#define AUDIO_PERIOD    3
 #define SAMPLES      (WAV_SAMPLE_RATE * AUDIO_PERIOD)  //acho que nao tem necessidade, ja que ainda quero fazer isso no servidor mesmo
 
 
@@ -51,9 +51,9 @@
 
 
 // Canal e configurações do DMA
-uint dma_channel;
+/*uint dma_channel;
 dma_channel_config dma_cfg;
-
+*/
 // Buffer de amostras do ADC.
 uint16_t adc_buffer[SAMPLES];
 static struct tcp_pcb *client_pcb;
@@ -65,7 +65,7 @@ static struct tcp_pcb *client_pcb;
 /**
  * Realiza as leituras do ADC e armazena os valores no buffer.
  */
-void sample_mic() {
+/*void sample_mic() {
   adc_fifo_drain(); // Limpa o FIFO do ADC.
   adc_run(false); // Desliga o ADC (se estiver ligado) para configurar o DMA.
 
@@ -91,7 +91,7 @@ void sample_mic() {
         adc_buffer[i] = audio_sample;
     }
 
-}
+}*/
 
 void sample_mic_no_dma()
 {

@@ -44,8 +44,11 @@
 #define ADC_STEP (3.3f/5.f) // Intervalos de volume do microfone.
 
 // Pino e número de LEDs da matriz de LEDs.
-#define LED_PIN 7
-#define LED_COUNT 25
+#define GREEN_LED_PIN 11
+#define RECORD_BTN  5
+#define LISTEN_BTN  6
+
+
 
 
 
@@ -57,6 +60,8 @@ dma_channel_config dma_cfg;
 // Buffer de amostras do ADC.
 uint16_t adc_buffer[SAMPLES];
 static struct tcp_pcb *client_pcb;
+
+uint16_t listen_flag = 1; 
 
 
 //declaracao de funcoes
@@ -124,7 +129,7 @@ void sample_mic_no_dma()
 
 
 
-
+//acho que o problema ta aqui. e nem to printando isso ne.
 // Callback when data is received
 static err_t recv_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
     if (p == NULL) {
@@ -132,8 +137,9 @@ static err_t recv_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_
         tcp_close(tpcb);
     } else {
         // Process received data
+        printf("recebi dados uhu");
         tcp_recved(tpcb, p->len); // Acknowledge data reception
-        pbuf_free(p); // Free the buffer
+        pbuf_free(p); // Free the buffer  //testar sem isso aqui
     }
     return ERR_OK;
 }
@@ -306,8 +312,21 @@ int main() {
   channel_config_set_dreq(&dma_cfg, DREQ_ADC); // Usamos a requisição de dados do ADC
 */
   // Amostragem de teste.
-  printf("Amostragem de teste...\n");
+  //printf("Amostragem de teste...\n");
   //sample_mic();
+
+  gpio_init(GREEN_LED_PIN);
+  gpio_set_dir(GREEN_LED_PIN, GPIO_OUT);  
+  gpio_put(GREEN_LED_PIN, 0);  
+
+
+  gpio_init(RECORD_BTN);
+  gpio_set_dir(RECORD_BTN,GPIO_IN);
+  gpio_pull_up(RECORD_BTN);
+
+  gpio_init(LISTEN_BTN);
+  gpio_set_dir(LISTEN_BTN,GPIO_IN);
+  gpio_pull_up(LISTEN_BTN);
 
 
   printf("Configuracoes completas!\n");
@@ -319,22 +338,7 @@ int main() {
 
   printf("começando a gravar");
 
-  sample_mic_no_dma();
-
-  printf("termino da gravacao");
-
-  // mandando ao servidor
-
-   for (int i = 0; i < SAMPLES; i += CHUNK_SIZE) {
-        // Calcular o tamanho do chunk atual (o último pode ser menor que CHUNK_SIZE)
-        size_t current_chunk_size = ((i + CHUNK_SIZE) <= SAMPLES) 
-                                    ? CHUNK_SIZE 
-                                    : (SAMPLES - i);
-
-        // Passar o ponteiro deslocado para a função send_to_server
-        send_to_server(&adc_buffer[i], current_chunk_size);
-        sleep_ms(1000);
-    }
+  
 
 
   while (true) {
@@ -347,6 +351,50 @@ int main() {
      //send_to_server(adc_buffer, SAMPLES);
     
     //sleep_ms(100);
+
+    //usar interrupcao p ele n ficar preso
+
+    if(!gpio_get(RECORD_BTN))
+    {   
+        sleep_ms(1000); //para nao gravar o barulho do botao
+        gpio_put(GREEN_LED_PIN,1);
+
+        sample_mic_no_dma();
+
+        gpio_put(GREEN_LED_PIN,0);
+
+        printf("termino da gravacao");
+
+        // mandando ao servidor
+
+        for (int i = 0; i < SAMPLES; i += CHUNK_SIZE) {
+            // Calcular o tamanho do chunk atual (o último pode ser menor que CHUNK_SIZE)
+            size_t current_chunk_size = ((i + CHUNK_SIZE) <= SAMPLES) 
+                                        ? CHUNK_SIZE 
+                                        : (SAMPLES - i);
+
+            // Passar o ponteiro deslocado para a função send_to_server
+            send_to_server(&adc_buffer[i], current_chunk_size);
+            sleep_ms(500);
+        }
+
+
+        send_to_server(&listen_flag, 1); // Envia a flag ao servidor com tamanho 1
+        sleep_ms(500); 
+    }
+
+    /*else if (!gpio_get(LISTEN_BTN)) 
+    {
+        printf("Botão LISTEN pressionado\n");
+
+        send_to_server(&listen_flag, 1); // Envia a flag ao servidor com tamanho 1
+        sleep_ms(500); // Evita múltiplos envios acidentais se o botão for segurado
+    }*/
+        
+
+
+
+
   }
 
   cyw43_arch_deinit();

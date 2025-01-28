@@ -3,6 +3,20 @@ import wave
 import json
 import numpy as np
 from vosk import Model, KaldiRecognizer
+import noisereduce as nr
+import sounddevice as sd
+#from playsound import playsound
+#import simpleaudio as sa
+import winsound
+import scipy
+import scipy.io.wavfile as wavfile
+import tensorflow as tf
+import tensorflow_hub as hub
+import numpy as np
+import csv
+
+
+
 
 # Configurações do servidor
 SERVER_IP = '192.168.1.193'  # Aceita conexões de qualquer IP
@@ -21,9 +35,46 @@ total_samples = 0
 MODEL_PATH = "vosk-model-small-pt-0.3"  # O modelo baixado e descompactado
 
 # Carregar o modelo
-print("Carregando o modelo do Vosk...")
-model = Model(MODEL_PATH)
-print("Modelo carregado!")
+#print("Carregando o modelo do Vosk...")
+#model = Model(MODEL_PATH)
+#print("Modelo carregado!")
+
+
+
+# Find the name of the class with the top score when mean-aggregated across frames.
+def class_names_from_csv(class_map_csv_text):
+  """Returns list of class names corresponding to score vector."""
+  class_names = []
+  with tf.io.gfile.GFile(class_map_csv_text) as csvfile:
+    reader = csv.DictReader(csvfile)
+    for row in reader:
+      class_names.append(row['display_name'])
+
+  return class_names
+
+
+
+def ensure_sample_rate(original_sample_rate, waveform,
+                       desired_sample_rate=16000):
+  """Resample waveform if required."""
+  if original_sample_rate != desired_sample_rate:
+    desired_length = int(round(float(len(waveform)) /
+                               original_sample_rate * desired_sample_rate))
+    waveform = scipy.signal.resample(waveform, desired_length)
+  return desired_sample_rate, waveform
+
+
+
+def play_audio(audio_array, sample_rate):
+    """Reproduz o áudio diretamente e aguarda até que termine."""
+    audio_array_float = audio_array.astype(np.float32)
+    audio_array_float /= np.max(np.abs(audio_array_float))  # Normalizando
+    
+
+    sd.play(audio_array_float, samplerate=sample_rate)
+    sd.wait()  # Aguarda a reprodução terminar
+
+
 
 # Função para salvar áudio como arquivo WAV
 def save_audio_as_wav(audio_data, sample_rate, filename="audios/audio.wav"):
@@ -48,11 +99,57 @@ def transcribe_audio(audio_path):
     print(f"Transcrição: {transcription}")
     return transcription
 
-# Inicia o servidor
-def start_server():
 
-    full_audio_data = []  # Armazena os dados de áudio completos
-    total_samples = 0 
+
+def classify_audio(audio_path):
+    wav_file_name = audio_path
+    sample_rate, wav_data = wavfile.read(wav_file_name, 'rb')
+    sample_rate, wav_data = ensure_sample_rate(sample_rate, wav_data)
+
+    waveform = wav_data / tf.int16.max
+
+    # Run the model, check the output.
+    scores, embeddings, spectrogram = model(waveform)
+
+    scores_np = scores.numpy()
+    spectrogram_np = spectrogram.numpy()
+    infered_class = class_names[scores_np.mean(axis=0).argmax()]
+    print(f'The main sound is: {infered_class}')
+    return infered_class
+
+
+
+def process_audio(full_audio_data, sample_rate):
+    # Concatena os dados de áudio acumulados
+    full_audio_array = np.concatenate(full_audio_data)
+
+    audio_no_noise = nr.reduce_noise(y = full_audio_array, sr=sample_rate)
+
+
+    #audio_repeated = np.tile(audio_no_noise, 4)
+
+    # Salva o áudio como arquivo WAV
+    audio_path = "audios/received_audio.wav"
+    save_audio_as_wav(audio_no_noise, sample_rate, audio_path)
+
+    winsound.PlaySound(audio_path, winsound.SND_FILENAME)
+    #play_audio(audio_no_noise, sample_rate)
+
+    # Transcreve o áudio
+    audio_class = classify_audio(audio_path)
+    #print(f"Transcrição: {transcription}")
+
+    return audio_class
+
+model = hub.load('https://tfhub.dev/google/yamnet/1')
+
+class_map_path = model.class_map_path().numpy()
+class_names = class_names_from_csv(class_map_path)
+
+
+
+
+def start_server():
 
     print(f"Iniciando servidor TCP na porta {SERVER_PORT}...")
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -65,10 +162,20 @@ def start_server():
 
     client_socket.settimeout(TIMEOUT)  # Define o tempo de espera para 5 segundos
 
+    return client_socket, client_address
+
+# Inicia o servidor
+def receive_data():
+
+    full_audio_data = []  # Armazena os dados de áudio completos
+    total_samples = 0 
+
+    client_socket, client_address = start_server()
+    
 
     while True:
-        ## acho que isso aqui nao devia tar no while. porque eu so quero 1 cliente
-        
+       
+
 
         try:
             #full_audio_data = []  # Armazena os dados de áudio completos
@@ -89,25 +196,40 @@ def start_server():
                     raise ConnectionError("Conexão encerrada pelo cliente.")
                 data += packet
 
-            # Decodifica os dados binários em um array de uint16
-            audio_data = np.frombuffer(data, dtype=np.uint16)
+            # Se o tamanho do dado for 1, interpretamos como a flag "LISTEN"
+            if data_size == 2 and data[0] == 1:
+                print("Flag LISTEN recebida, processando o áudio acumulado...")
+                # Chama a função para processar o áudio
+                transcription = process_audio(full_audio_data, SAMPLE_RATE)
 
-            print(audio_data)
+                # Envia a transcrição de volta ao cliente
+                #response = json.dumps({"text": transcription})
+                #client_socket.sendall(len(response).to_bytes(4, byteorder="big"))
+                #client_socket.sendall(response.encode("utf-8"))
+                client_socket.sendall(len(transcription).to_bytes(4, byteorder="big"))
+                client_socket.sendall(transcription.encode("utf-8"))
+                # Reseta o acumulador para próximo áudio
+                full_audio_data = []
+                total_samples = 0
+            else:
+                # Caso contrário, trata como dados de áudio
+                audio_data = np.frombuffer(data, dtype=np.uint16)
+                print(f"Recebendo áudio: {audio_data}")
+                full_audio_data.append(audio_data)
+                total_samples += len(audio_data)
 
-            full_audio_data.append(audio_data)
-            total_samples += len(audio_data)
-
-            print(f"Dados acumulados: {total_samples} amostras")
-
-            # Verifica se o áudio acumulado já atingiu o tempo
-            if total_samples >= SAMPLE_RATE * AUDIO_DURATION:
-            #if total_samples >= 43000:
-                print("Áudio suficiente recebido, processando...")
-                break
-            
+                print(f"Dados acumulados: {total_samples} amostras")
+                
         except socket.timeout:
             print("Timeout atingido. Nenhum dado recebido dentro do período esperado.")
-            break  
+
+            opcao = int(input("Digite 1 para continuar e 2 para reiniciar o servidor"))
+
+            if(opcao == 2):
+                client_socket.close()
+                print(f"Conexão com {client_address} encerrada.")
+                client_socket, client_address = start_server()
+            
 
         except Exception as e:
             print(f"Erro: {e}")
@@ -119,24 +241,7 @@ def start_server():
          #   client_socket.close()
           #  print(f"Conexão com {client_address} encerrada.")
 
-    # Concatena os dados de áudio acumulados
-    full_audio_array = np.concatenate(full_audio_data)
-
-    np.save("audio_data.npy", full_audio_array)
-
-    # Salva o áudio como WAV
-    audio_path = "audios/received_audio.wav"
-    save_audio_as_wav(full_audio_array, SAMPLE_RATE, audio_path)
-
-    # Transcreve o áudio
-    transcription = transcribe_audio(audio_path)
-
-    print(transcription)
-
-    # Envia a transcrição de volta ao cliente
-    response = json.dumps({"text": transcription})
-    client_socket.sendall(len(response).to_bytes(4, byteorder='big'))
-    client_socket.sendall(response.encode('utf-8'))
+    
 
     client_socket.close()
     print(f"Conexão com {client_address} encerrada.")
@@ -144,4 +249,4 @@ def start_server():
 
 
 if __name__ == '__main__':
-    start_server()
+    receive_data()

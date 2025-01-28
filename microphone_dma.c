@@ -187,6 +187,10 @@ void send_to_server(uint16_t *data, size_t len) {
 
         printf("PCB criado com sucesso.\n");
 
+        // Configurar callbacks adicionais
+        tcp_recv(client_pcb, recv_callback);
+        tcp_sent(client_pcb, sent_callback);
+
         tcp_arg(client_pcb, data); // Passar dados para o callback
         tcp_err(client_pcb, error_callback);
 
@@ -226,6 +230,16 @@ void send_to_server(uint16_t *data, size_t len) {
         // Copiar os dados de áudio para o buffer após os 4 bytes iniciais
         memcpy(send_buffer + 4, data, data_size);
 
+        // Verificar espaço disponível no buffer TCP
+        uint16_t available_space = tcp_sndbuf(client_pcb);
+        if ((4 + data_size) > available_space) {
+            printf("Espaço insuficiente no buffer TCP: %d bytes disponíveis, %lu bytes necessários\n",
+                available_space, 4 + data_size);
+            free(send_buffer); // Liberar o buffer alocado
+            return; // Retornar para evitar tentar o envio
+        }
+
+
         // Enviar os dados
         err_t write_err = tcp_write(client_pcb, send_buffer, 4 + data_size, TCP_WRITE_FLAG_COPY);
         if (write_err != ERR_OK) {
@@ -237,12 +251,10 @@ void send_to_server(uint16_t *data, size_t len) {
         printf("Dados enviados (%lu bytes).\n", 4 + data_size);
 
         // Garantir que os dados sejam transmitidos
-        tcp_output(client_pcb);
+        //tcp_output(client_pcb);  //só um teste gente kkkkkk
         free(send_buffer);
 
-        // Configurar callbacks adicionais
-        tcp_recv(client_pcb, recv_callback);
-        tcp_sent(client_pcb, sent_callback);
+        
 
     
     }

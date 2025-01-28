@@ -147,12 +147,9 @@ class_map_path = model.class_map_path().numpy()
 class_names = class_names_from_csv(class_map_path)
 
 
-# Inicia o servidor
+
+
 def start_server():
-
-    full_audio_data = []  # Armazena os dados de áudio completos
-    total_samples = 0 
-
 
     print(f"Iniciando servidor TCP na porta {SERVER_PORT}...")
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -165,10 +162,19 @@ def start_server():
 
     client_socket.settimeout(TIMEOUT)  # Define o tempo de espera para 5 segundos
 
+    return client_socket, client_address
+
+# Inicia o servidor
+def receive_data():
+
+    full_audio_data = []  # Armazena os dados de áudio completos
+    total_samples = 0 
+
+    client_socket, client_address = start_server()
+    
 
     while True:
-        ## acho que isso aqui nao devia tar no while. porque eu so quero 1 cliente
-        
+       
 
 
         try:
@@ -197,10 +203,11 @@ def start_server():
                 transcription = process_audio(full_audio_data, SAMPLE_RATE)
 
                 # Envia a transcrição de volta ao cliente
-                response = json.dumps({"text": transcription})
-                client_socket.sendall(len(response).to_bytes(4, byteorder="big"))
-                client_socket.sendall(response.encode("utf-8"))
-
+                #response = json.dumps({"text": transcription})
+                #client_socket.sendall(len(response).to_bytes(4, byteorder="big"))
+                #client_socket.sendall(response.encode("utf-8"))
+                client_socket.sendall(len(transcription).to_bytes(4, byteorder="big"))
+                client_socket.sendall(transcription.encode("utf-8"))
                 # Reseta o acumulador para próximo áudio
                 full_audio_data = []
                 total_samples = 0
@@ -215,7 +222,14 @@ def start_server():
                 
         except socket.timeout:
             print("Timeout atingido. Nenhum dado recebido dentro do período esperado.")
-            #break  
+
+            opcao = int(input("Digite 1 para continuar e 2 para reiniciar o servidor"))
+
+            if(opcao == 2):
+                client_socket.close()
+                print(f"Conexão com {client_address} encerrada.")
+                client_socket, client_address = start_server()
+            
 
         except Exception as e:
             print(f"Erro: {e}")
@@ -227,24 +241,7 @@ def start_server():
          #   client_socket.close()
           #  print(f"Conexão com {client_address} encerrada.")
 
-    # Concatena os dados de áudio acumulados
-    full_audio_array = np.concatenate(full_audio_data)
-
-    np.save("audio_data.npy", full_audio_array)
-
-    # Salva o áudio como WAV
-    audio_path = "audios/received_audio.wav"
-    save_audio_as_wav(full_audio_array, SAMPLE_RATE, audio_path)
-
-    # Transcreve o áudio
-    transcription = transcribe_audio(audio_path)
-
-    print(transcription)
-
-    # Envia a transcrição de volta ao cliente
-    response = json.dumps({"text": transcription})
-    client_socket.sendall(len(response).to_bytes(4, byteorder='big'))
-    client_socket.sendall(response.encode('utf-8'))
+    
 
     client_socket.close()
     print(f"Conexão com {client_address} encerrada.")
@@ -252,4 +249,4 @@ def start_server():
 
 
 if __name__ == '__main__':
-    start_server()
+    receive_data()

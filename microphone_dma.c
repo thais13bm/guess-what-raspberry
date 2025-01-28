@@ -30,7 +30,7 @@
 //#define ADC_CLOCK_DIV 96.f
 //#define ADC_CLOCK_DIV 3000.f  //novo teste
 
-#define CHUNK_SIZE 1024
+#define CHUNK_SIZE 1200 //so um teste, ver se melhora
 #define AUDIO_PERIOD    3
 #define SAMPLES      (WAV_SAMPLE_RATE * AUDIO_PERIOD)  //acho que nao tem necessidade, ja que ainda quero fazer isso no servidor mesmo
 
@@ -45,6 +45,7 @@
 
 // Pino e número de LEDs da matriz de LEDs.
 #define GREEN_LED_PIN 11
+#define BLUE_LED_PIN 12
 #define RECORD_BTN  5
 #define LISTEN_BTN  6
 
@@ -331,6 +332,11 @@ int main() {
   gpio_set_dir(GREEN_LED_PIN, GPIO_OUT);  
   gpio_put(GREEN_LED_PIN, 0);  
 
+  gpio_init(BLUE_LED_PIN);
+  gpio_set_dir(BLUE_LED_PIN, GPIO_OUT);  
+  gpio_put(BLUE_LED_PIN, 0);
+
+
 
   gpio_init(RECORD_BTN);
   gpio_set_dir(RECORD_BTN,GPIO_IN);
@@ -350,7 +356,8 @@ int main() {
 
   printf("começando a gravar");
 
-  
+  gpio_put(BLUE_LED_PIN,1);
+
 
 
   while (true) {
@@ -366,8 +373,13 @@ int main() {
 
     //usar interrupcao p ele n ficar preso
 
+    
+
+
     if(!gpio_get(RECORD_BTN))
     {   
+        gpio_put(BLUE_LED_PIN,0);
+
         sleep_ms(1000); //para nao gravar o barulho do botao
         gpio_put(GREEN_LED_PIN,1);
 
@@ -392,7 +404,9 @@ int main() {
 
 
         send_to_server(&listen_flag, 1); // Envia a flag ao servidor com tamanho 1
-        sleep_ms(500); 
+        sleep_ms(5000); 
+        gpio_put(BLUE_LED_PIN,1);
+
     }
 
     /*else if (!gpio_get(LISTEN_BTN)) 

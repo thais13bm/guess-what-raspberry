@@ -22,7 +22,7 @@ import csv
 SERVER_IP = '192.168.1.193'  # Aceita conexões de qualquer IP
 SERVER_PORT = 5000
 BUFFER_SIZE = 4096  # Tamanho do buffer para receber dados
-AUDIO_DURATION = 3  # Duração do áudio em segundos
+AUDIO_DURATION = 2  # Duração do áudio em segundos
 TIMEOUT = 10 
 
 SAMPLE_RATE = 22050

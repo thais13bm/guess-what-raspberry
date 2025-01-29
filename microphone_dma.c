@@ -62,7 +62,14 @@ dma_channel_config dma_cfg;
 uint16_t adc_buffer[SAMPLES];
 static struct tcp_pcb *client_pcb;
 
+
+static char recv_buffer[5]; // Buffer para armazenar dados recebidos
+static size_t recv_buffer_len = 0;
+char *data = NULL; 
+size_t data_len;
+
 uint16_t listen_flag = 1; 
+bool is_connected = false;
 
 
 //declaracao de funcoes
@@ -132,7 +139,7 @@ void sample_mic_no_dma()
 
 //acho que o problema ta aqui. e nem to printando isso ne.
 // Callback when data is received
-static err_t recv_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
+/*static err_t recv_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
     if (p == NULL) {
         // Connection closed
         tcp_close(tpcb);
@@ -143,7 +150,47 @@ static err_t recv_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_
         pbuf_free(p); // Free the buffer  //testar sem isso aqui
     }
     return ERR_OK;
+}*/
+
+
+// Callback when data is received
+static err_t recv_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
+    if (p == NULL) {
+        // Conexão fechada pelo cliente
+        printf("Conexão encerrada pelo servidor.\n");
+        tcp_close(tpcb);
+        return ERR_OK;
+    }
+
+    if (err != ERR_OK) {
+        printf("Erro no callback de recepção: %d\n", err);
+        pbuf_free(p);
+        return err;
+    }
+
+    // Verifica o tamanho do buffer recebido
+    size_t len = p->len;
+    if (len > 0) {
+        if ((recv_buffer_len + len) < sizeof(recv_buffer)) {
+            // Copia os dados para o buffer global
+            memcpy(recv_buffer + recv_buffer_len, p->payload, len);
+            recv_buffer_len += len;
+            printf("Recebi %zu bytes. Total acumulado: %zu bytes.\n", len, recv_buffer_len);
+        } else {
+            printf("Buffer de recepção está cheio. Dados descartados.\n");
+        }
+    }
+
+    // Libera o pbuf após processar os dados
+    pbuf_free(p);
+
+    // Confirma o recebimento ao servidor
+    tcp_recved(tpcb, len);
+
+    return ERR_OK;
 }
+
+
 
 // Callback when data is sent
 static err_t sent_callback(void *arg, struct tcp_pcb *tpcb, u16_t len) {
@@ -166,10 +213,11 @@ static void error_callback(void *arg, err_t err) {
     printf("Connection error: %d\n", err);
 }
 
-void send_to_server(uint16_t *data, size_t len) {
+
+void connect_to_server(){
     ip_addr_t server_ip;
     IP4_ADDR(&server_ip, 192, 168, 1, 193); // IP do servidor
-    static bool is_connected = false; 
+    //static bool is_connected = false; 
 
     if(!is_connected)
     {
@@ -192,7 +240,7 @@ void send_to_server(uint16_t *data, size_t len) {
         tcp_recv(client_pcb, recv_callback);
         tcp_sent(client_pcb, sent_callback);
 
-        tcp_arg(client_pcb, data); // Passar dados para o callback
+        
         tcp_err(client_pcb, error_callback);
 
         err_t err = tcp_connect(client_pcb, &server_ip, SERVER_PORT, connect_callback);
@@ -203,8 +251,16 @@ void send_to_server(uint16_t *data, size_t len) {
 
         is_connected = true;
     }
-   
-    else
+}
+
+
+
+void send_to_server(uint16_t *data, size_t len) {
+    ip_addr_t server_ip;
+    IP4_ADDR(&server_ip, 192, 168, 1, 193); // IP do servidor
+    
+    tcp_arg(client_pcb, data); // Passar dados para o callback
+    if(is_connected)
     {
         printf("envio de dados\n");
 
@@ -264,6 +320,16 @@ void send_to_server(uint16_t *data, size_t len) {
 
 }
 
+char* get_received_data(size_t *data_len) {
+    if (recv_buffer_len > 0) {
+        *data_len = recv_buffer_len;
+        recv_buffer_len = 0; // Reseta o comprimento após retornar os dados
+        return recv_buffer;
+    } else {
+        *data_len = 0;
+        return NULL;
+    }
+}
 
 
 
@@ -298,13 +364,7 @@ int main() {
   adc_init();
   adc_select_input(MIC_CHANNEL);
 
-  /*adc_fifo_setup(
-    true, // Habilitar FIFO
-    true, // Habilitar request de dados do DMA
-    1, // Threshold para ativar request DMA é 1 leitura do ADC
-    false, // Não usar bit de erro
-    false // Não fazer downscale das amostras para 8-bits, manter 12-bits.
-  );*/
+ 
 
   adc_set_clkdiv(ADC_CLOCK_DIV);
 
@@ -312,21 +372,7 @@ int main() {
 
   printf("Preparando DMA...");
 
-  // Tomando posse de canal do DMA.
-  /*dma_channel = dma_claim_unused_channel(true);
-
-  // Configurações do DMA.
-  dma_cfg = dma_channel_get_default_config(dma_channel);
-
-  channel_config_set_transfer_data_size(&dma_cfg, DMA_SIZE_16); // Tamanho da transferência é 16-bits (usamos uint16_t para armazenar valores do ADC)
-  channel_config_set_read_increment(&dma_cfg, false); // Desabilita incremento do ponteiro de leitura (lemos de um único registrador)
-  channel_config_set_write_increment(&dma_cfg, true); // Habilita incremento do ponteiro de escrita (escrevemos em um array/buffer)
   
-  channel_config_set_dreq(&dma_cfg, DREQ_ADC); // Usamos a requisição de dados do ADC
-*/
-  // Amostragem de teste.
-  //printf("Amostragem de teste...\n");
-  //sample_mic();
 
   gpio_init(GREEN_LED_PIN);
   gpio_set_dir(GREEN_LED_PIN, GPIO_OUT);  
@@ -356,58 +402,60 @@ int main() {
 
   printf("começando a gravar");
 
+  connect_to_server();
+  
+  
   gpio_put(BLUE_LED_PIN,1);
 
-
+  
 
   while (true) {
 
-    // Realiza uma amostragem do microfone.
-    //sample_mic_no_dma();
+    data = get_received_data(&data_len);
 
-    
+    if (data != NULL && data_len > 0)
+    {
+        printf("Dados recebidos (%zu bytes):\n", data_len);
+        
+        printf("\n");
 
-     //send_to_server(adc_buffer, SAMPLES);
-    
-    //sleep_ms(100);
+        // Verifica se a flag específica foi recebida
+        if (data_len == 1 && data[0] == 1)
+        {
+            printf("Flag LISTEN recebida! Iniciando gravação...\n");
+            gpio_put(BLUE_LED_PIN,0);
 
-    //usar interrupcao p ele n ficar preso
+            sleep_ms(1000); //para nao gravar o barulho do botao
+            gpio_put(GREEN_LED_PIN,1);
 
-    
+            sample_mic_no_dma();
+
+            gpio_put(GREEN_LED_PIN,0);
+
+            printf("termino da gravacao");
+
+            // mandando ao servidor
+
+            for (int i = 0; i < SAMPLES; i += CHUNK_SIZE) {
+                // Calcular o tamanho do chunk atual (o último pode ser menor que CHUNK_SIZE)
+                size_t current_chunk_size = ((i + CHUNK_SIZE) <= SAMPLES) 
+                                            ? CHUNK_SIZE 
+                                            : (SAMPLES - i);
+
+                // Passar o ponteiro deslocado para a função send_to_server
+                send_to_server(&adc_buffer[i], current_chunk_size);
+                sleep_ms(500);
+            }
 
 
-    if(!gpio_get(RECORD_BTN))
-    {   
-        gpio_put(BLUE_LED_PIN,0);
-
-        sleep_ms(1000); //para nao gravar o barulho do botao
-        gpio_put(GREEN_LED_PIN,1);
-
-        sample_mic_no_dma();
-
-        gpio_put(GREEN_LED_PIN,0);
-
-        printf("termino da gravacao");
-
-        // mandando ao servidor
-
-        for (int i = 0; i < SAMPLES; i += CHUNK_SIZE) {
-            // Calcular o tamanho do chunk atual (o último pode ser menor que CHUNK_SIZE)
-            size_t current_chunk_size = ((i + CHUNK_SIZE) <= SAMPLES) 
-                                        ? CHUNK_SIZE 
-                                        : (SAMPLES - i);
-
-            // Passar o ponteiro deslocado para a função send_to_server
-            send_to_server(&adc_buffer[i], current_chunk_size);
-            sleep_ms(500);
+            send_to_server(&listen_flag, 1); // Envia a flag ao servidor com tamanho 1
+            sleep_ms(5000); 
+            gpio_put(BLUE_LED_PIN,1);
         }
-
-
-        send_to_server(&listen_flag, 1); // Envia a flag ao servidor com tamanho 1
-        sleep_ms(5000); 
-        gpio_put(BLUE_LED_PIN,1);
-
     }
+
+
+    sleep_ms(100);  
 
     /*else if (!gpio_get(LISTEN_BTN)) 
     {
@@ -417,6 +465,7 @@ int main() {
         sleep_ms(500); // Evita múltiplos envios acidentais se o botão for segurado
     }*/
         
+      
 
 
 

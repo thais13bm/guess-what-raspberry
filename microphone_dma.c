@@ -402,6 +402,8 @@ int main() {
 
   printf("começando a gravar");
 
+    
+
   connect_to_server();
   
   
@@ -444,7 +446,7 @@ int main() {
 
                 // Passar o ponteiro deslocado para a função send_to_server
                 send_to_server(&adc_buffer[i], current_chunk_size);
-                sleep_ms(500);
+                sleep_ms(600);
             }
 
 

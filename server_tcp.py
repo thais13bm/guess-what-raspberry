@@ -175,12 +175,22 @@ def receive_data():
     while True:
         
         # Solicita comando ao servidor para iniciar gravação
-        user_input = int(input("Digite 1 para iniciar a gravação ou 2 para encerrar: "))
+        user_input = int(input("Digite 1 para iniciar a gravação, 2 para reiniciar ou 3 para encerrar: "))
         if user_input == 1:
             # Envia uma flag simples para o cliente
             client_socket.sendall(b'\x01')  # Flag "START" (1 byte)
             print("Flag 'START' enviada ao cliente. Aguardando dados de áudio...")
+        
         elif user_input == 2:
+            client_socket.close()
+            full_audio_data = []  # Armazena os dados de áudio completos
+            total_samples = 0
+
+            client_socket, client_address = start_server()
+            print(f"Conexão estabelecida com o cliente {client_address}.")
+
+        
+        elif user_input == 3:
             print("Encerrando servidor...")
             client_socket.close()
             break
@@ -215,6 +225,8 @@ def receive_data():
 
                     # Reseta o acumulador para próximo áudio 
                     ##vamos pensar em talvez nao resetar ne, nao sei
+                    ### colocar mais um input aqui, perguntando se quer acumular ou quer resetar
+
                     full_audio_data = []
                     total_samples = 0
                     break 
@@ -232,8 +244,8 @@ def receive_data():
                 opcao = int(input("Digite 1 para continuar e 2 para reiniciar o servidor: "))
 
                 if opcao == 2:
-                    client_socket.close()
-                    print(f"Conexão com {client_address} encerrada.")
+                    #client_socket.close()
+                    #print(f"Conexão com {client_address} encerrada.")
                     client_socket, client_address = start_server()   ##talvez o correto aqui fosse um break
                     break
             except Exception as e:

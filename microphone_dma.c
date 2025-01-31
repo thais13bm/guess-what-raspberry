@@ -18,6 +18,10 @@
 #define I2C_SDA 14
 #define I2C_SCL 15
 
+#define CHAR_WIDTH 10  // Largura estimada de um caractere
+#define LINE_HEIGHT 8  // Altura da linha em pixels
+#define MAX_WIDTH ssd1306_width  
+
 #define WAV_SAMPLE_RATE  22050
 #define WAV_PWM_COUNT   (125000000 / WAV_SAMPLE_RATE)
 
@@ -60,6 +64,8 @@
 dma_channel_config dma_cfg;
 */
 // Buffer de amostras do ADC.
+unsigned long sample_count = 0;
+unsigned long long sample_period;
 uint16_t adc_buffer[SAMPLES];
 static struct tcp_pcb *client_pcb;
 
@@ -109,29 +115,17 @@ bool is_connected = false;
 
 void sample_mic_no_dma()
 {
-   unsigned long SampleCount = 0;
-   unsigned long long SamplePeriod;
-
-  
-   SampleCount = 0;
-  
-  /**************************************************************/
- /* Fill audio buffer with values read from the A/D converter. */
-/**************************************************************/
-   SamplePeriod = time_us_64() + (1000000 / WAV_SAMPLE_RATE);
-   while (SampleCount < SAMPLES)
-   {
-  /***************************/
- /* Read values @ 22050 Hz. */
-/***************************/
-      while(time_us_64() < SamplePeriod);
-      SamplePeriod = time_us_64() + (1000000 / WAV_SAMPLE_RATE);
-  /****************************************************/
- /* Read the current audio level from A/D converter. */
-/****************************************************/
-      adc_buffer[SampleCount++] = (int16_t)((adc_read() * 32) - 32768);
-
    
+   sample_count = 0;
+   sample_period = time_us_64() + (1000000 / WAV_SAMPLE_RATE);
+
+   while (sample_count < SAMPLES)
+   {
+  
+      while(time_us_64() < sample_period);
+      sample_period = time_us_64() + (1000000 / WAV_SAMPLE_RATE);
+      adc_buffer[sample_count++] = (int16_t)((adc_read() * 32) - 32768);
+
    }
 }
 
@@ -504,6 +498,13 @@ int main() {
             printf("termino da gravacao");
 
             // mandando ao servidor
+            memset(ssd, 0, ssd1306_buffer_length);
+            ssd1306_draw_string(ssd, 0, 0, "Enviando audio");
+            
+            render_on_display(ssd, &frame_area);
+
+
+
 
             for (int i = 0; i < SAMPLES; i += CHUNK_SIZE) {
                 // Calcular o tamanho do chunk atual (o último pode ser menor que CHUNK_SIZE)
@@ -528,14 +529,25 @@ int main() {
 
                 printf("%d",data_len);
 
-                if(data_len>0){
-                    
+                if (data_len > 0)
+                {                    
+                    uint x = 5;  // Posição inicial x
+                    uint y = 0;  // Posição inicial y
+
                     for (uint i = 0; i < data_len; i++)
                     {   
+                        if (x + CHAR_WIDTH > MAX_WIDTH) 
+                        {
+                            // Quebra de linha: Reinicia x e move para a próxima linha
+                            x = 5;
+                            y += LINE_HEIGHT;
+                        }
 
                         printf("%c", data[i]);
-                        ssd1306_draw_char(ssd, 5 + (i * 10), 0, data[i]);
+                        ssd1306_draw_char(ssd, x, y, data[i]);
+                        x += CHAR_WIDTH; // Avança para a próxima posição horizontal
                     }
+                    
                     render_on_display(ssd, &frame_area);   
                     break;
                 }

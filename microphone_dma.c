@@ -488,18 +488,10 @@ int main() {
 
   while (true) {
 
-    data = get_received_data(&data_len);
 
-    if (data != NULL && data_len > 0)
-    {
-        printf("Dados recebidos (%zu bytes):\n", data_len);
-        
-        printf("\n");
-
-        // Verifica se a flag específica foi recebida
-        if (data_len == 1 && data[0] == 1)
-        {
-            printf("Flag LISTEN recebida! Iniciando gravação...\n");
+        if(!gpio_get(RECORD_BTN))
+        {    
+            printf("Iniciando gravação...\n");
             gpio_put(BLUE_LED_PIN,0);
 
             sleep_ms(1000); //para nao gravar o barulho do botao
@@ -557,7 +549,7 @@ int main() {
 
             gpio_put(BLUE_LED_PIN,1);
         }
-    }
+    
 
 
     sleep_ms(100);  
@@ -570,10 +562,6 @@ int main() {
         sleep_ms(500); // Evita múltiplos envios acidentais se o botão for segurado
     }*/
         
-      
-
-
-
 
   }
 

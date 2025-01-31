@@ -174,85 +174,63 @@ def receive_data():
 
     while True:
         
-        # Solicita comando ao servidor para iniciar gravação
-        user_input = int(input("Digite 1 para iniciar a gravação, 2 para reiniciar ou 3 para encerrar: "))
-        if user_input == 1:
-            # Envia uma flag simples para o cliente
-            client_socket.sendall(b'\x01')  # Flag "START" (1 byte)
-            print("Flag 'START' enviada ao cliente. Aguardando dados de áudio...")
-        
-        elif user_input == 2:
-            client_socket.close()
-            full_audio_data = []  # Armazena os dados de áudio completos
-            total_samples = 0
+        try:
+            # Recebe os primeiros 4 bytes com o tamanho do dado
+            size_data = client_socket.recv(4)
+            if len(size_data) < 4:
+                raise ValueError("Tamanho dos dados inválido.")
 
-            client_socket, client_address = start_server()
-            print(f"Conexão estabelecida com o cliente {client_address}.")
-            continue
-        
-        elif user_input == 3:
-            print("Encerrando servidor...")
-            client_socket.close()
-            break
-        
-        while(True):
-            try:
-                # Recebe os primeiros 4 bytes com o tamanho do dado
-                size_data = client_socket.recv(4)
-                if len(size_data) < 4:
-                    raise ValueError("Tamanho dos dados inválido.")
+            data_size = int.from_bytes(size_data, byteorder='big')
+            print(f"Tamanho dos dados recebidos: {data_size} bytes")
 
-                data_size = int.from_bytes(size_data, byteorder='big')
-                print(f"Tamanho dos dados recebidos: {data_size} bytes")
+            # Recebe os dados binários
+            data = b""
+            while len(data) < data_size:
+                packet = client_socket.recv(BUFFER_SIZE)
+                if not packet:
+                    raise ConnectionError("Conexão encerrada pelo cliente.")
+                data += packet
 
-                # Recebe os dados binários
-                data = b""
-                while len(data) < data_size:
-                    packet = client_socket.recv(BUFFER_SIZE)
-                    if not packet:
-                        raise ConnectionError("Conexão encerrada pelo cliente.")
-                    data += packet
+            # Se o tamanho do dado for 1, interpretamos como a flag "LISTEN"
+            if data_size == 2 and data[0] == 1:
+                print("Flag LISTEN recebida, processando o áudio acumulado...")
+                # Chama a função para processar o áudio
+                transcription = process_audio(full_audio_data, SAMPLE_RATE)
 
-                # Se o tamanho do dado for 1, interpretamos como a flag "LISTEN"
-                if data_size == 2 and data[0] == 1:
-                    print("Flag LISTEN recebida, processando o áudio acumulado...")
-                    # Chama a função para processar o áudio
-                    transcription = process_audio(full_audio_data, SAMPLE_RATE)
-
-                    #client_socket.sendall(len(transcription).to_bytes(4, byteorder="big"))  ##talvez descomentar isso aq
-                    client_socket.sendall(transcription.encode("utf-8"))
+                #client_socket.sendall(len(transcription).to_bytes(4, byteorder="big"))  ##talvez descomentar isso aq
+                client_socket.sendall(transcription.encode("utf-8"))
 
 
-                    # Reseta o acumulador para próximo áudio 
-                    ##vamos pensar em talvez nao resetar ne, nao sei
-                    ### colocar mais um input aqui, perguntando se quer acumular ou quer resetar
+                # Reseta o acumulador para próximo áudio 
+                ##vamos pensar em talvez nao resetar ne, nao sei
+                ### colocar mais um input aqui, perguntando se quer acumular ou quer resetar
 
-                    full_audio_data = []
-                    total_samples = 0
-                    break 
-                else:
-                    # Caso contrário, trata como dados de áudio
-                    audio_data = np.frombuffer(data, dtype=np.uint16)
-                    print(f"Recebendo áudio: {audio_data}")
-                    full_audio_data.append(audio_data)
-                    total_samples += len(audio_data)
+                full_audio_data = []
+                total_samples = 0
+            
+            else:
+                # Caso contrário, trata como dados de áudio
+                audio_data = np.frombuffer(data, dtype=np.uint16)
+                print(f"Recebendo áudio: {audio_data}")
+                full_audio_data.append(audio_data)
+                total_samples += len(audio_data)
 
-                    print(f"Dados acumulados: {total_samples} amostras")
+                print(f"Dados acumulados: {total_samples} amostras")
 
-            except socket.timeout:
-                print("Timeout atingido. Nenhum dado recebido dentro do período esperado.")
-                opcao = int(input("Digite 1 para continuar e 2 para reiniciar o servidor: "))
+        except socket.timeout:
+            print("Timeout atingido. Nenhum dado recebido dentro do período esperado.")
+            opcao = int(input("Digite 1 para continuar e 2 para reiniciar o servidor: "))  ##manter isso para fins de debug e simplicidade. mas ao enviar, vamos remover
 
-                if opcao == 2:
-                    #client_socket.close()
-                    #print(f"Conexão com {client_address} encerrada.")
-                    client_socket, client_address = start_server()   ##talvez o correto aqui fosse um break
-                    break
-            except Exception as e:
-                print(f"Erro: {e}")
-                #error_msg = json.dumps({"error": str(e)})
-                #client_socket.sendall(len(error_msg).to_bytes(4, byteorder='big'))
-                #client_socket.sendall(error_msg.encode('utf-8'))
+            if opcao == 2:
+                #client_socket.close()
+                #print(f"Conexão com {client_address} encerrada.")
+                client_socket, client_address = start_server()   ##talvez o correto aqui fosse um break
+                
+        except Exception as e:
+            print(f"Erro: {e}")
+            #error_msg = json.dumps({"error": str(e)})
+            #client_socket.sendall(len(error_msg).to_bytes(4, byteorder='big'))
+            #client_socket.sendall(error_msg.encode('utf-8'))
 
     client_socket.close()
     print(f"Conexão com {client_address} encerrada.")

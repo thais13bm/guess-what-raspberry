@@ -9,6 +9,14 @@
 
 #include "lwip/tcp.h"
 #include <stdint.h>
+#include "inc/ssd1306.h"
+
+
+#include "hardware/i2c.h"
+
+#define I2C_PORT i2c1
+#define I2C_SDA 14
+#define I2C_SCL 15
 
 #define WAV_SAMPLE_RATE  22050
 #define WAV_PWM_COUNT   (125000000 / WAV_SAMPLE_RATE)
@@ -35,13 +43,6 @@
 #define SAMPLES      (WAV_SAMPLE_RATE * AUDIO_PERIOD)  //acho que nao tem necessidade, ja que ainda quero fazer isso no servidor mesmo
 
 
-//#define SAMPLES 400 // Número de amostras que serão feitas do ADC.
-
-//#define SAMPLES 80000
-
-#define ADC_ADJUST(x) (x * 3.3f / (1 << 12u) - 1.65f) // Ajuste do valor do ADC para Volts.
-#define ADC_MAX 3.3f
-#define ADC_STEP (3.3f/5.f) // Intervalos de volume do microfone.
 
 // Pino e número de LEDs da matriz de LEDs.
 #define GREEN_LED_PIN 11
@@ -63,7 +64,7 @@ uint16_t adc_buffer[SAMPLES];
 static struct tcp_pcb *client_pcb;
 
 
-static char recv_buffer[5]; // Buffer para armazenar dados recebidos
+static char recv_buffer[10]; // Buffer para armazenar dados recebidos
 static size_t recv_buffer_len = 0;
 char *data = NULL; 
 size_t data_len;
@@ -409,7 +410,81 @@ int main() {
   
   gpio_put(BLUE_LED_PIN,1);
 
+  // Inicialização do i2c
+    i2c_init(i2c1, ssd1306_i2c_clock * 1000);
+    gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);
+    gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);
+    gpio_pull_up(I2C_SDA);
+    gpio_pull_up(I2C_SCL);
+
+    // Processo de inicialização completo do OLED SSD1306
+    ssd1306_init();
+
+    // Preparar área de renderização para o display (ssd1306_width pixels por ssd1306_n_pages páginas)
+    struct render_area frame_area = {
+        start_column : 0,
+        end_column : ssd1306_width - 1,
+        start_page : 0,
+        end_page : ssd1306_n_pages - 1
+    };
+
+    calculate_render_area_buffer_length(&frame_area);
+
+    // zera o display inteiro
+    uint8_t ssd[ssd1306_buffer_length];
+    memset(ssd, 0, ssd1306_buffer_length);
+    render_on_display(ssd, &frame_area);
+
+   //restart:
+
+// Parte do código para exibir a mensagem no display (opcional: mudar ssd1306_height para 32 em ssd1306_i2c.h)
+// /**
+    //ssd1306_draw_string(ssd, 5, 0, "guess what");
+    //render_on_display(ssd, &frame_area); 
+    /*char *text[] = {
+        "  Bem-vindos!   ",
+        "  Embarcatech   "};
+
+    int y = 0;
+    for (uint i = 0; i < count_of(text); i++)
+    {
+        ssd1306_draw_string(ssd, 5, y, text[i]);
+        y += 8;
+    }
+    render_on_display(ssd, &frame_area);  */
+
+
+
+  /*i2c_init(I2C_PORT, 400*1000);
   
+  gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);
+  gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);
+  gpio_pull_up(I2C_SDA);
+  gpio_pull_up(I2C_SCL);
+
+  ssd1306_t ssd;
+
+  ssd1306_init(&ssd, WIDTH, HEIGHT, false, 0x3C, I2C_PORT);
+  ssd1306_config(&ssd);
+
+  ssd1306_send_data(&ssd);
+
+  ssd1306_fill(&ssd, false);
+  ssd1306_hline(&ssd, 0, 127, 32, true);
+  ssd1306_vline(&ssd, 63, 0, 63, true);
+  //ssd1306_draw_string(&ssd, 0, 0, "Bem-vindos!");
+  //ssd1306_draw_string(&ssd, 0, 10, "Embarcatech");
+  ssd1306_send_data(&ssd); // Atualiza o display
+
+    ssd1306_draw_string(&ssd, 0, 0, "Bem-vindos!");
+    ssd1306_draw_string(&ssd, 0, 10, "Embarcatech");
+    ssd1306_send_data(&ssd); // Atualiza o display
+
+  ssd1306_send_data(&ssd);  */
+
+
+    
+
 
   while (true) {
 
@@ -451,7 +526,35 @@ int main() {
 
 
             send_to_server(&listen_flag, 1); // Envia a flag ao servidor com tamanho 1
+            
+            memset(ssd, 0, ssd1306_buffer_length);
+            render_on_display(ssd, &frame_area);
+
+            while(true){
+
+                data = get_received_data(&data_len);
+
+                printf("%d",data_len);
+
+                if(data_len>0){
+                    
+                    for (uint i = 0; i < data_len; i++)
+                    {   
+
+                        printf("%c", data[i]);
+                        ssd1306_draw_char(ssd, 5 + (i * 10), 0, data[i]);
+                    }
+                    render_on_display(ssd, &frame_area);   
+                    break;
+                }
+            sleep_ms(100);
+            }
+
+
             sleep_ms(5000); 
+            
+
+
             gpio_put(BLUE_LED_PIN,1);
         }
     }

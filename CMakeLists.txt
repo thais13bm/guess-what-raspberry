@@ -65,7 +65,7 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(microphone_dma microphone_dma.c)
+add_executable(microphone_dma microphone_dma.c inc/ssd1306_i2c.c)
 
 pico_set_program_name(microphone_dma "microphone_dma")
 pico_set_program_version(microphone_dma "0.1")
@@ -102,6 +102,7 @@ target_link_libraries(microphone_dma
         hardware_adc
         hardware_pio
         hardware_clocks
+        hardware_i2c
         #pico_cyw43_arch_lwip_sys_freertos
         #FreeRTOS-Kernel-Heap4
         #pico_async_context_freertos

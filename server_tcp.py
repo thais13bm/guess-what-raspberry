@@ -188,7 +188,7 @@ def receive_data():
 
             client_socket, client_address = start_server()
             print(f"Conexão estabelecida com o cliente {client_address}.")
-
+            continue
         
         elif user_input == 3:
             print("Encerrando servidor...")
@@ -220,7 +220,7 @@ def receive_data():
                     transcription = process_audio(full_audio_data, SAMPLE_RATE)
 
                     #client_socket.sendall(len(transcription).to_bytes(4, byteorder="big"))  ##talvez descomentar isso aq
-                    #client_socket.sendall(transcription.encode("utf-8"))
+                    client_socket.sendall(transcription.encode("utf-8"))
 
 
                     # Reseta o acumulador para próximo áudio 

@@ -19,7 +19,7 @@ import csv
 
 
 # Configurações do servidor
-SERVER_IP = '192.168.1.193'  # Aceita conexões de qualquer IP
+SERVER_IP = '192.168.1.100'  # Aceita conexões de qualquer IP
 SERVER_PORT = 5000
 BUFFER_SIZE = 4096  # Tamanho do buffer para receber dados
 AUDIO_DURATION = 2  # Duração do áudio em segundos

@@ -9,6 +9,18 @@
 
 #include "lwip/tcp.h"
 #include <stdint.h>
+#include "inc/ssd1306.h"
+
+
+#include "hardware/i2c.h"
+
+#define I2C_PORT i2c1
+#define I2C_SDA 14
+#define I2C_SCL 15
+
+#define CHAR_WIDTH 10  // Largura estimada de um caractere
+#define LINE_HEIGHT 8  // Altura da linha em pixels
+#define MAX_WIDTH ssd1306_width  
 
 #define WAV_SAMPLE_RATE  22050
 #define WAV_PWM_COUNT   (125000000 / WAV_SAMPLE_RATE)
@@ -30,21 +42,15 @@
 //#define ADC_CLOCK_DIV 96.f
 //#define ADC_CLOCK_DIV 3000.f  //novo teste
 
-#define CHUNK_SIZE 1024
+#define CHUNK_SIZE 1200 //so um teste, ver se melhora
 #define AUDIO_PERIOD    3
 #define SAMPLES      (WAV_SAMPLE_RATE * AUDIO_PERIOD)  //acho que nao tem necessidade, ja que ainda quero fazer isso no servidor mesmo
 
 
-//#define SAMPLES 400 // Número de amostras que serão feitas do ADC.
-
-//#define SAMPLES 80000
-
-#define ADC_ADJUST(x) (x * 3.3f / (1 << 12u) - 1.65f) // Ajuste do valor do ADC para Volts.
-#define ADC_MAX 3.3f
-#define ADC_STEP (3.3f/5.f) // Intervalos de volume do microfone.
 
 // Pino e número de LEDs da matriz de LEDs.
 #define GREEN_LED_PIN 11
+#define BLUE_LED_PIN 12
 #define RECORD_BTN  5
 #define LISTEN_BTN  6
 
@@ -58,10 +64,19 @@
 dma_channel_config dma_cfg;
 */
 // Buffer de amostras do ADC.
+unsigned long sample_count = 0;
+unsigned long long sample_period;
 uint16_t adc_buffer[SAMPLES];
 static struct tcp_pcb *client_pcb;
 
+
+static char recv_buffer[10]; // Buffer para armazenar dados recebidos
+static size_t recv_buffer_len = 0;
+char *data = NULL; 
+size_t data_len;
+
 uint16_t listen_flag = 1; 
+bool is_connected = false;
 
 
 //declaracao de funcoes
@@ -100,29 +115,17 @@ uint16_t listen_flag = 1;
 
 void sample_mic_no_dma()
 {
-   unsigned long SampleCount = 0;
-   unsigned long long SamplePeriod;
-
-  
-   SampleCount = 0;
-  
-  /**************************************************************/
- /* Fill audio buffer with values read from the A/D converter. */
-/**************************************************************/
-   SamplePeriod = time_us_64() + (1000000 / WAV_SAMPLE_RATE);
-   while (SampleCount < SAMPLES)
-   {
-  /***************************/
- /* Read values @ 22050 Hz. */
-/***************************/
-      while(time_us_64() < SamplePeriod);
-      SamplePeriod = time_us_64() + (1000000 / WAV_SAMPLE_RATE);
-  /****************************************************/
- /* Read the current audio level from A/D converter. */
-/****************************************************/
-      adc_buffer[SampleCount++] = (int16_t)((adc_read() * 32) - 32768);
-
    
+   sample_count = 0;
+   sample_period = time_us_64() + (1000000 / WAV_SAMPLE_RATE);
+
+   while (sample_count < SAMPLES)
+   {
+  
+      while(time_us_64() < sample_period);
+      sample_period = time_us_64() + (1000000 / WAV_SAMPLE_RATE);
+      adc_buffer[sample_count++] = (int16_t)((adc_read() * 32) - 32768);
+
    }
 }
 
@@ -131,7 +134,7 @@ void sample_mic_no_dma()
 
 //acho que o problema ta aqui. e nem to printando isso ne.
 // Callback when data is received
-static err_t recv_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
+/*static err_t recv_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
     if (p == NULL) {
         // Connection closed
         tcp_close(tpcb);
@@ -142,7 +145,47 @@ static err_t recv_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_
         pbuf_free(p); // Free the buffer  //testar sem isso aqui
     }
     return ERR_OK;
+}*/
+
+
+// Callback when data is received
+static err_t recv_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
+    if (p == NULL) {
+        // Conexão fechada pelo cliente
+        printf("Conexão encerrada pelo servidor.\n");
+        tcp_close(tpcb);
+        return ERR_OK;
+    }
+
+    if (err != ERR_OK) {
+        printf("Erro no callback de recepção: %d\n", err);
+        pbuf_free(p);
+        return err;
+    }
+
+    // Verifica o tamanho do buffer recebido
+    size_t len = p->len;
+    if (len > 0) {
+        if ((recv_buffer_len + len) < sizeof(recv_buffer)) {
+            // Copia os dados para o buffer global
+            memcpy(recv_buffer + recv_buffer_len, p->payload, len);
+            recv_buffer_len += len;
+            printf("Recebi %zu bytes. Total acumulado: %zu bytes.\n", len, recv_buffer_len);
+        } else {
+            printf("Buffer de recepção está cheio. Dados descartados.\n");
+        }
+    }
+
+    // Libera o pbuf após processar os dados
+    pbuf_free(p);
+
+    // Confirma o recebimento ao servidor
+    tcp_recved(tpcb, len);
+
+    return ERR_OK;
 }
+
+
 
 // Callback when data is sent
 static err_t sent_callback(void *arg, struct tcp_pcb *tpcb, u16_t len) {
@@ -165,10 +208,11 @@ static void error_callback(void *arg, err_t err) {
     printf("Connection error: %d\n", err);
 }
 
-void send_to_server(uint16_t *data, size_t len) {
+
+void connect_to_server(){
     ip_addr_t server_ip;
     IP4_ADDR(&server_ip, 192, 168, 1, 193); // IP do servidor
-    static bool is_connected = false; 
+    //static bool is_connected = false; 
 
     if(!is_connected)
     {
@@ -191,7 +235,7 @@ void send_to_server(uint16_t *data, size_t len) {
         tcp_recv(client_pcb, recv_callback);
         tcp_sent(client_pcb, sent_callback);
 
-        tcp_arg(client_pcb, data); // Passar dados para o callback
+        
         tcp_err(client_pcb, error_callback);
 
         err_t err = tcp_connect(client_pcb, &server_ip, SERVER_PORT, connect_callback);
@@ -202,8 +246,16 @@ void send_to_server(uint16_t *data, size_t len) {
 
         is_connected = true;
     }
-   
-    else
+}
+
+
+
+void send_to_server(uint16_t *data, size_t len) {
+    ip_addr_t server_ip;
+    IP4_ADDR(&server_ip, 192, 168, 1, 193); // IP do servidor
+    
+    tcp_arg(client_pcb, data); // Passar dados para o callback
+    if(is_connected)
     {
         printf("envio de dados\n");
 
@@ -263,6 +315,16 @@ void send_to_server(uint16_t *data, size_t len) {
 
 }
 
+char* get_received_data(size_t *data_len) {
+    if (recv_buffer_len > 0) {
+        *data_len = recv_buffer_len;
+        recv_buffer_len = 0; // Reseta o comprimento após retornar os dados
+        return recv_buffer;
+    } else {
+        *data_len = 0;
+        return NULL;
+    }
+}
 
 
 
@@ -297,13 +359,7 @@ int main() {
   adc_init();
   adc_select_input(MIC_CHANNEL);
 
-  /*adc_fifo_setup(
-    true, // Habilitar FIFO
-    true, // Habilitar request de dados do DMA
-    1, // Threshold para ativar request DMA é 1 leitura do ADC
-    false, // Não usar bit de erro
-    false // Não fazer downscale das amostras para 8-bits, manter 12-bits.
-  );*/
+ 
 
   adc_set_clkdiv(ADC_CLOCK_DIV);
 
@@ -311,25 +367,16 @@ int main() {
 
   printf("Preparando DMA...");
 
-  // Tomando posse de canal do DMA.
-  /*dma_channel = dma_claim_unused_channel(true);
-
-  // Configurações do DMA.
-  dma_cfg = dma_channel_get_default_config(dma_channel);
-
-  channel_config_set_transfer_data_size(&dma_cfg, DMA_SIZE_16); // Tamanho da transferência é 16-bits (usamos uint16_t para armazenar valores do ADC)
-  channel_config_set_read_increment(&dma_cfg, false); // Desabilita incremento do ponteiro de leitura (lemos de um único registrador)
-  channel_config_set_write_increment(&dma_cfg, true); // Habilita incremento do ponteiro de escrita (escrevemos em um array/buffer)
   
-  channel_config_set_dreq(&dma_cfg, DREQ_ADC); // Usamos a requisição de dados do ADC
-*/
-  // Amostragem de teste.
-  //printf("Amostragem de teste...\n");
-  //sample_mic();
 
   gpio_init(GREEN_LED_PIN);
   gpio_set_dir(GREEN_LED_PIN, GPIO_OUT);  
   gpio_put(GREEN_LED_PIN, 0);  
+
+  gpio_init(BLUE_LED_PIN);
+  gpio_set_dir(BLUE_LED_PIN, GPIO_OUT);  
+  gpio_put(BLUE_LED_PIN, 0);
+
 
 
   gpio_init(RECORD_BTN);
@@ -350,50 +397,125 @@ int main() {
 
   printf("começando a gravar");
 
-  
+    
 
+  connect_to_server();
+  
+  
+  gpio_put(BLUE_LED_PIN,1);
+
+  // Inicialização do i2c
+    i2c_init(i2c1, ssd1306_i2c_clock * 1000);
+    gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);
+    gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);
+    gpio_pull_up(I2C_SDA);
+    gpio_pull_up(I2C_SCL);
+
+    // Processo de inicialização completo do OLED SSD1306
+    ssd1306_init();
+
+    // Preparar área de renderização para o display (ssd1306_width pixels por ssd1306_n_pages páginas)
+    struct render_area frame_area = {
+        start_column : 0,
+        end_column : ssd1306_width - 1,
+        start_page : 0,
+        end_page : ssd1306_n_pages - 1
+    };
+
+    calculate_render_area_buffer_length(&frame_area);
+
+    // zera o display inteiro
+    uint8_t ssd[ssd1306_buffer_length];
+    memset(ssd, 0, ssd1306_buffer_length);
+    render_on_display(ssd, &frame_area);
+
+   
 
   while (true) {
 
-    // Realiza uma amostragem do microfone.
-    //sample_mic_no_dma();
 
-    
+        if(!gpio_get(RECORD_BTN))
+        {    
+            printf("Iniciando gravação...\n");
+            gpio_put(BLUE_LED_PIN,0);
 
-     //send_to_server(adc_buffer, SAMPLES);
-    
-    //sleep_ms(100);
+            sleep_ms(1000); //para nao gravar o barulho do botao
+            gpio_put(GREEN_LED_PIN,1);
 
-    //usar interrupcao p ele n ficar preso
+            sample_mic_no_dma();
 
-    if(!gpio_get(RECORD_BTN))
-    {   
-        sleep_ms(1000); //para nao gravar o barulho do botao
-        gpio_put(GREEN_LED_PIN,1);
+            gpio_put(GREEN_LED_PIN,0);
 
-        sample_mic_no_dma();
+            printf("termino da gravacao");
 
-        gpio_put(GREEN_LED_PIN,0);
+            // mandando ao servidor
+            memset(ssd, 0, ssd1306_buffer_length);
+            ssd1306_draw_string(ssd, 0, 0, "Enviando audio");
+            
+            render_on_display(ssd, &frame_area);
 
-        printf("termino da gravacao");
 
-        // mandando ao servidor
 
-        for (int i = 0; i < SAMPLES; i += CHUNK_SIZE) {
-            // Calcular o tamanho do chunk atual (o último pode ser menor que CHUNK_SIZE)
-            size_t current_chunk_size = ((i + CHUNK_SIZE) <= SAMPLES) 
-                                        ? CHUNK_SIZE 
-                                        : (SAMPLES - i);
 
-            // Passar o ponteiro deslocado para a função send_to_server
-            send_to_server(&adc_buffer[i], current_chunk_size);
-            sleep_ms(500);
+            for (int i = 0; i < SAMPLES; i += CHUNK_SIZE) {
+                // Calcular o tamanho do chunk atual (o último pode ser menor que CHUNK_SIZE)
+                size_t current_chunk_size = ((i + CHUNK_SIZE) <= SAMPLES) 
+                                            ? CHUNK_SIZE 
+                                            : (SAMPLES - i);
+
+                // Passar o ponteiro deslocado para a função send_to_server
+                send_to_server(&adc_buffer[i], current_chunk_size);
+                sleep_ms(600);
+            }
+
+
+            send_to_server(&listen_flag, 1); // Envia a flag ao servidor com tamanho 1
+            
+            memset(ssd, 0, ssd1306_buffer_length);
+            render_on_display(ssd, &frame_area);
+
+            while(true){
+
+                data = get_received_data(&data_len);
+
+                printf("%d",data_len);
+
+                if (data_len > 0)
+                {                    
+                    uint x = 5;  // Posição inicial x
+                    uint y = 0;  // Posição inicial y
+
+                    for (uint i = 0; i < data_len; i++)
+                    {   
+                        if (x + CHAR_WIDTH > MAX_WIDTH) 
+                        {
+                            // Quebra de linha: Reinicia x e move para a próxima linha
+                            x = 5;
+                            y += LINE_HEIGHT;
+                        }
+
+                        printf("%c", data[i]);
+                        ssd1306_draw_char(ssd, x, y, data[i]);
+                        x += CHAR_WIDTH; // Avança para a próxima posição horizontal
+                    }
+                    
+                    render_on_display(ssd, &frame_area);   
+                    break;
+                }
+            sleep_ms(100);
+            }
+
+
+            sleep_ms(5000); 
+            
+
+
+            gpio_put(BLUE_LED_PIN,1);
         }
+    
 
 
-        send_to_server(&listen_flag, 1); // Envia a flag ao servidor com tamanho 1
-        sleep_ms(500); 
-    }
+    sleep_ms(100);  
 
     /*else if (!gpio_get(LISTEN_BTN)) 
     {
@@ -403,9 +525,6 @@ int main() {
         sleep_ms(500); // Evita múltiplos envios acidentais se o botão for segurado
     }*/
         
-
-
-
 
   }
 

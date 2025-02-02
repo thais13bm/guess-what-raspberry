@@ -22,8 +22,8 @@ import csv
 SERVER_IP = '192.168.1.193'  # Aceita conexões de qualquer IP
 SERVER_PORT = 5000
 BUFFER_SIZE = 4096  # Tamanho do buffer para receber dados
-AUDIO_DURATION = 3  # Duração do áudio em segundos
-TIMEOUT = 10 
+AUDIO_DURATION = 2  # Duração do áudio em segundos
+TIMEOUT = 20 
 
 SAMPLE_RATE = 22050
 
@@ -166,20 +166,15 @@ def start_server():
 
 # Inicia o servidor
 def receive_data():
-
     full_audio_data = []  # Armazena os dados de áudio completos
-    total_samples = 0 
+    total_samples = 0
 
     client_socket, client_address = start_server()
-    
+    print(f"Conexão estabelecida com o cliente {client_address}.")
 
     while True:
-       
-
-
+        
         try:
-            #full_audio_data = []  # Armazena os dados de áudio completos
-            #total_samples = 0  # Contador de amostras recebidas
             # Recebe os primeiros 4 bytes com o tamanho do dado
             size_data = client_socket.recv(4)
             if len(size_data) < 4:
@@ -202,15 +197,17 @@ def receive_data():
                 # Chama a função para processar o áudio
                 transcription = process_audio(full_audio_data, SAMPLE_RATE)
 
-                # Envia a transcrição de volta ao cliente
-                #response = json.dumps({"text": transcription})
-                #client_socket.sendall(len(response).to_bytes(4, byteorder="big"))
-                #client_socket.sendall(response.encode("utf-8"))
-                client_socket.sendall(len(transcription).to_bytes(4, byteorder="big"))
+                #client_socket.sendall(len(transcription).to_bytes(4, byteorder="big"))  ##talvez descomentar isso aq
                 client_socket.sendall(transcription.encode("utf-8"))
-                # Reseta o acumulador para próximo áudio
+
+
+                # Reseta o acumulador para próximo áudio 
+                ##vamos pensar em talvez nao resetar ne, nao sei
+                ### colocar mais um input aqui, perguntando se quer acumular ou quer resetar
+
                 full_audio_data = []
                 total_samples = 0
+            
             else:
                 # Caso contrário, trata como dados de áudio
                 audio_data = np.frombuffer(data, dtype=np.uint16)
@@ -219,33 +216,24 @@ def receive_data():
                 total_samples += len(audio_data)
 
                 print(f"Dados acumulados: {total_samples} amostras")
-                
+
         except socket.timeout:
             print("Timeout atingido. Nenhum dado recebido dentro do período esperado.")
+            opcao = int(input("Digite 1 para continuar e 2 para reiniciar o servidor: "))  ##manter isso para fins de debug e simplicidade. mas ao enviar, vamos remover
 
-            opcao = int(input("Digite 1 para continuar e 2 para reiniciar o servidor"))
-
-            if(opcao == 2):
-                client_socket.close()
-                print(f"Conexão com {client_address} encerrada.")
-                client_socket, client_address = start_server()
-            
-
+            if opcao == 2:
+                #client_socket.close()
+                #print(f"Conexão com {client_address} encerrada.")
+                client_socket, client_address = start_server()   ##talvez o correto aqui fosse um break
+                
         except Exception as e:
             print(f"Erro: {e}")
-            error_msg = json.dumps({"error": str(e)})
-            client_socket.sendall(len(error_msg).to_bytes(4, byteorder='big'))
-            client_socket.sendall(error_msg.encode('utf-8'))
-
-        #finally:
-         #   client_socket.close()
-          #  print(f"Conexão com {client_address} encerrada.")
-
-    
+            #error_msg = json.dumps({"error": str(e)})
+            #client_socket.sendall(len(error_msg).to_bytes(4, byteorder='big'))
+            #client_socket.sendall(error_msg.encode('utf-8'))
 
     client_socket.close()
     print(f"Conexão com {client_address} encerrada.")
-
 
 
 if __name__ == '__main__':

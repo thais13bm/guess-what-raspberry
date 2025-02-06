@@ -42,28 +42,20 @@
 //#define ADC_CLOCK_DIV 96.f
 //#define ADC_CLOCK_DIV 3000.f  //novo teste
 
-#define CHUNK_SIZE 1200 //so um teste, ver se melhora
+#define CHUNK_SIZE 1200 
 #define AUDIO_PERIOD    3
-#define SAMPLES      (WAV_SAMPLE_RATE * AUDIO_PERIOD)  //acho que nao tem necessidade, ja que ainda quero fazer isso no servidor mesmo
+#define SAMPLES      (WAV_SAMPLE_RATE * AUDIO_PERIOD)  
 
 
 
-// Pino e número de LEDs da matriz de LEDs.
+
 #define GREEN_LED_PIN 11
 #define BLUE_LED_PIN 12
 #define RECORD_BTN  5
-#define LISTEN_BTN  6
 
 
 
 
-
-
-// Canal e configurações do DMA
-/*uint dma_channel;
-dma_channel_config dma_cfg;
-*/
-// Buffer de amostras do ADC.
 unsigned long sample_count = 0;
 unsigned long long sample_period;
 uint16_t adc_buffer[SAMPLES];
@@ -81,6 +73,7 @@ size_t data_len;
 
 uint16_t listen_flag = 1; 
 bool is_connected = false;
+bool is_recording = false;
 
 
 //declaracao de funcoes
@@ -215,7 +208,7 @@ static void error_callback(void *arg, err_t err) {
 
 void connect_to_server(){
     ip_addr_t server_ip;
-    IP4_ADDR(&server_ip, 192, 168, 1, 100); // IP do servidor
+    IP4_ADDR(&server_ip, 192, 168, 117, 4); // IP do servidor
     //static bool is_connected = false; 
 
     if(!is_connected)
@@ -256,7 +249,7 @@ void connect_to_server(){
 
 void send_to_server(uint16_t *data, size_t len) {
     ip_addr_t server_ip;
-    IP4_ADDR(&server_ip, 192, 168, 1, 100); // IP do servidor
+    IP4_ADDR(&server_ip, 192, 168, 117, 4); // IP do servidor
     
     tcp_arg(client_pcb, data); // Passar dados para o callback
     if(is_connected)
@@ -302,7 +295,7 @@ void send_to_server(uint16_t *data, size_t len) {
         printf("Dados enviados (%lu bytes).\n", 4 + data_size);
 
         // Garantir que os dados sejam transmitidos
-        //tcp_output(client_pcb);  //só um teste gente kkkkkk
+        //tcp_output(client_pcb);  //com isso aq da erro de panic, nao tem jeito
     
 
         
@@ -340,8 +333,8 @@ int main() {
   }
   cyw43_arch_enable_sta_mode();
 
-  const char *ssid = "EXT_LIVE TIM_7660_2G";
-  const char *password = "Z248ZmXH";
+  const char *ssid = "Galaxy A12A7EA";
+  const char *password = "prtd7966";
   printf("Conectando ao Wi-Fi...\n");
   if (cyw43_arch_wifi_connect_timeout_ms(ssid, password, CYW43_AUTH_WPA2_AES_PSK, 10000)) {
       printf("Falha ao conectar ao Wi-Fi.\n");
@@ -382,20 +375,13 @@ int main() {
   gpio_set_dir(RECORD_BTN,GPIO_IN);
   gpio_pull_up(RECORD_BTN);
 
-  gpio_init(LISTEN_BTN);
-  gpio_set_dir(LISTEN_BTN,GPIO_IN);
-  gpio_pull_up(LISTEN_BTN);
 
 
-  printf("Configuracoes completas!\n");
 
-  printf("\n----\nIniciando loop...\n----\n");
+  
+  sleep_ms(5000);  //acho que da pra tirar isso aq
 
-
-  sleep_ms(5000);
-
-  printf("começando a gravar");
-
+  
     
 
   connect_to_server();
@@ -432,8 +418,14 @@ int main() {
 
   while (true) {
 
-
         if(!gpio_get(RECORD_BTN))
+        {
+            is_recording = !(is_recording);
+        }
+
+
+
+        if(is_recording)
         {    
             printf("Iniciando gravação...\n");
             gpio_put(BLUE_LED_PIN,0);
@@ -464,7 +456,7 @@ int main() {
 
                 // Passar o ponteiro deslocado para a função send_to_server
                 send_to_server(&adc_buffer[i], current_chunk_size);
-                sleep_ms(600);
+                sleep_ms(500);
             }
 
 
@@ -516,13 +508,7 @@ int main() {
 
     sleep_ms(100);  
 
-    /*else if (!gpio_get(LISTEN_BTN)) 
-    {
-        printf("Botão LISTEN pressionado\n");
-
-        send_to_server(&listen_flag, 1); // Envia a flag ao servidor com tamanho 1
-        sleep_ms(500); // Evita múltiplos envios acidentais se o botão for segurado
-    }*/
+    
         
 
   }

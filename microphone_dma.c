@@ -25,7 +25,7 @@
 #define WAV_SAMPLE_RATE  22050
 #define WAV_PWM_COUNT   (125000000 / WAV_SAMPLE_RATE)
 
-#define SERVER_IP "192.168.1.193" // Substitua pelo IP do servidor Flask
+
 #define SERVER_PORT 5000
 
 // Pino e canal do microfone no ADC.
@@ -39,10 +39,9 @@
 // Parâmetros e macros do ADC.
 #define ADC_CLOCK_DIV 2177.28
 
-//#define ADC_CLOCK_DIV 96.f
-//#define ADC_CLOCK_DIV 3000.f  //novo teste
 
-#define CHUNK_SIZE 1200 
+
+#define CHUNK_SIZE 1024
 #define AUDIO_PERIOD    3
 #define SAMPLES      (WAV_SAMPLE_RATE * AUDIO_PERIOD)  
 
@@ -63,10 +62,10 @@ static struct tcp_pcb *client_pcb;
 
 
 
-char send_buffer[4 + 2400];
+char send_buffer[4 + 2048];
 
 
-static char recv_buffer[10]; // Buffer para armazenar dados recebidos
+static char recv_buffer[15]; // Buffer para armazenar dados recebidos
 static size_t recv_buffer_len = 0;
 char *data = NULL; 
 size_t data_len;
@@ -79,36 +78,6 @@ bool is_recording = false;
 //declaracao de funcoes
 
 
-/**
- * Realiza as leituras do ADC e armazena os valores no buffer.
- */
-/*void sample_mic() {
-  adc_fifo_drain(); // Limpa o FIFO do ADC.
-  adc_run(false); // Desliga o ADC (se estiver ligado) para configurar o DMA.
-
-  dma_channel_configure(dma_channel, &dma_cfg,
-    adc_buffer, // Escreve no buffer.
-    &(adc_hw->fifo), // Lê do ADC.
-    SAMPLES, // Faz SAMPLES amostras.
-    true // Liga o DMA.
-  );
-
-  // Liga o ADC e espera acabar a leitura.
-  adc_run(true);
-  dma_channel_wait_for_finish_blocking(dma_channel);
-  
-  // Acabou a leitura, desliga o ADC de novo.
-  adc_run(false);
-
-  for (size_t i = 0; i < SAMPLES; i++) {
-        
-        int16_t audio_sample = (int16_t)((adc_buffer[i] * 32) - 32768); // Converte para escala de áudio.
-
-        // Substitui os valores no buffer original (ou use outro buffer, se preferir).
-        adc_buffer[i] = audio_sample;
-    }
-
-}*/
 
 void sample_mic_no_dma()
 {
@@ -129,23 +98,7 @@ void sample_mic_no_dma()
 
 
 
-//acho que o problema ta aqui. e nem to printando isso ne.
-// Callback when data is received
-/*static err_t recv_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
-    if (p == NULL) {
-        // Connection closed
-        tcp_close(tpcb);
-    } else {
-        // Process received data
-        printf("recebi dados uhu");
-        tcp_recved(tpcb, p->len); // Acknowledge data reception
-        pbuf_free(p); // Free the buffer  //testar sem isso aqui
-    }
-    return ERR_OK;
-}*/
-
-
-// Callback when data is received
+// Callback para o recebimento de dados
 static err_t recv_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
     if (p == NULL) {
         // Conexão fechada pelo cliente
@@ -184,9 +137,9 @@ static err_t recv_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_
 
 
 
-// Callback when data is sent
+// Callback para o envio de dados
 static err_t sent_callback(void *arg, struct tcp_pcb *tpcb, u16_t len) {
-    printf("Data sent successfully.\n");
+    printf("Dados enviados.\n");
     return ERR_OK;
 }
 
@@ -200,15 +153,15 @@ static err_t connect_callback(void *arg, struct tcp_pcb *tpcb, err_t err) {
 }
 
 
-// Callback when an error occurs
+// Callback de erro
 static void error_callback(void *arg, err_t err) {
-    printf("Connection error: %d\n", err);
+    printf("erro de conexão: %d\n", err);
 }
 
 
 void connect_to_server(){
     ip_addr_t server_ip;
-    IP4_ADDR(&server_ip, 192, 168, 117, 4); // IP do servidor
+    IP4_ADDR(&server_ip, 192, 168, 1, 101); // IP do servidor
     //static bool is_connected = false; 
 
     if(!is_connected)
@@ -249,7 +202,7 @@ void connect_to_server(){
 
 void send_to_server(uint16_t *data, size_t len) {
     ip_addr_t server_ip;
-    IP4_ADDR(&server_ip, 192, 168, 117, 4); // IP do servidor
+    IP4_ADDR(&server_ip, 192, 168, 1, 101); // IP do servidor
     
     tcp_arg(client_pcb, data); // Passar dados para o callback
     if(is_connected)
@@ -326,6 +279,26 @@ int main() {
   // Delay para o usuário abrir o monitor serial...
   sleep_ms(1000);
 
+  gpio_init(GREEN_LED_PIN);
+  gpio_set_dir(GREEN_LED_PIN, GPIO_OUT);  
+  gpio_put(GREEN_LED_PIN, 0);  
+
+  gpio_init(BLUE_LED_PIN);
+  gpio_set_dir(BLUE_LED_PIN, GPIO_OUT);  
+  gpio_put(BLUE_LED_PIN, 0);
+
+
+
+  gpio_init(RECORD_BTN);
+  gpio_set_dir(RECORD_BTN,GPIO_IN);
+  gpio_pull_up(RECORD_BTN);
+
+  //gpio_put(BLUE_LED_PIN,1);
+
+  
+
+
+
   // Configurar Wi-Fi
   if (cyw43_arch_init()) {
       printf("Falha ao inicializar Wi-Fi.\n");
@@ -333,8 +306,12 @@ int main() {
   }
   cyw43_arch_enable_sta_mode();
 
-  const char *ssid = "Galaxy A12A7EA";
-  const char *password = "prtd7966";
+  /*const char *ssid = "Galaxy A12A7EA";
+  const char *password = "prtd7966";*/
+
+  const char *ssid = "EXT_LIVE TIM_7660_2G";
+  const char *password = "Z248ZmXH";
+
   printf("Conectando ao Wi-Fi...\n");
   if (cyw43_arch_wifi_connect_timeout_ms(ssid, password, CYW43_AUTH_WPA2_AES_PSK, 10000)) {
       printf("Falha ao conectar ao Wi-Fi.\n");
@@ -361,22 +338,7 @@ int main() {
 
   
 
-  gpio_init(GREEN_LED_PIN);
-  gpio_set_dir(GREEN_LED_PIN, GPIO_OUT);  
-  gpio_put(GREEN_LED_PIN, 0);  
-
-  gpio_init(BLUE_LED_PIN);
-  gpio_set_dir(BLUE_LED_PIN, GPIO_OUT);  
-  gpio_put(BLUE_LED_PIN, 0);
-
-
-
-  gpio_init(RECORD_BTN);
-  gpio_set_dir(RECORD_BTN,GPIO_IN);
-  gpio_pull_up(RECORD_BTN);
-
-
-
+  
 
   
   sleep_ms(5000);  //acho que da pra tirar isso aq
@@ -497,7 +459,7 @@ int main() {
             }
 
 
-            sleep_ms(5000); 
+            sleep_ms(8000); 
             
 
 

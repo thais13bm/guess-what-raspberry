@@ -1,8 +1,7 @@
 import socket
 import wave
-import json
+
 import numpy as np
-from vosk import Model, KaldiRecognizer
 import noisereduce as nr
 import sounddevice as sd
 #from playsound import playsound
@@ -19,25 +18,17 @@ import csv
 
 
 # Configurações do servidor
-SERVER_IP = '192.168.1.193'  # Aceita conexões de qualquer IP
+SERVER_IP = '192.168.1.101'  # Aceita conexões de qualquer IP
 SERVER_PORT = 5000
 BUFFER_SIZE = 4096  # Tamanho do buffer para receber dados
 AUDIO_DURATION = 2  # Duração do áudio em segundos
-TIMEOUT = 20 
+TIMEOUT = 30
 
 SAMPLE_RATE = 22050
 
 full_audio_data = []  # Armazena os dados de áudio completos
 total_samples = 0 
 
-
-# Caminho para o modelo de português do Vosk
-MODEL_PATH = "vosk-model-small-pt-0.3"  # O modelo baixado e descompactado
-
-# Carregar o modelo
-#print("Carregando o modelo do Vosk...")
-#model = Model(MODEL_PATH)
-#print("Modelo carregado!")
 
 
 
@@ -64,7 +55,7 @@ def ensure_sample_rate(original_sample_rate, waveform,
   return desired_sample_rate, waveform
 
 
-
+## essa nao estou usando ...
 def play_audio(audio_array, sample_rate):
     """Reproduz o áudio diretamente e aguarda até que termine."""
     audio_array_float = audio_array.astype(np.float32)
@@ -85,19 +76,6 @@ def save_audio_as_wav(audio_data, sample_rate, filename="audios/audio.wav"):
         wf.writeframes(audio_data.tobytes())
     print(f"Áudio salvo como {filename}")
 
-# Função para transcrever áudio usando o Vosk
-def transcribe_audio(audio_path):
-    with wave.open(audio_path, "rb") as audio_file:
-        frame_rate = audio_file.getframerate()
-        audio_content = audio_file.readframes(audio_file.getnframes())
-
-    recognizer = KaldiRecognizer(model, frame_rate)
-    recognizer.AcceptWaveform(audio_content)
-    result = recognizer.Result()
-    result_json = json.loads(result)
-    transcription = result_json.get("text", "")
-    print(f"Transcrição: {transcription}")
-    return transcription
 
 
 
@@ -137,9 +115,10 @@ def process_audio(full_audio_data, sample_rate):
 
     # Transcreve o áudio
     audio_class = classify_audio(audio_path)
-    #print(f"Transcrição: {transcription}")
+
 
     return audio_class
+
 
 model = hub.load('https://tfhub.dev/google/yamnet/1')
 
@@ -160,13 +139,13 @@ def start_server():
     client_socket, client_address = server_socket.accept()
     print(f"Cliente conectado: {client_address}")
 
-    client_socket.settimeout(TIMEOUT)  # Define o tempo de espera para 5 segundos
+    client_socket.settimeout(TIMEOUT)  # Define o tempo de espera 
 
     return client_socket, client_address
 
 # Inicia o servidor
 def receive_data():
-    full_audio_data = []  # Armazena os dados de áudio completos
+    full_audio_data = []  # Armazenar os dados de áudio completos
     total_samples = 0
 
     client_socket, client_address = start_server()
@@ -191,14 +170,14 @@ def receive_data():
                     raise ConnectionError("Conexão encerrada pelo cliente.")
                 data += packet
 
-            # Se o tamanho do dado for 1, interpretamos como a flag "LISTEN"
+            # Se o tamanho do dado for 2 bytes, interpretamos como a flag de processar
             if data_size == 2 and data[0] == 1:
                 print("Flag LISTEN recebida, processando o áudio acumulado...")
                 # Chama a função para processar o áudio
                 transcription = process_audio(full_audio_data, SAMPLE_RATE)
 
-                #client_socket.sendall(len(transcription).to_bytes(4, byteorder="big"))  ##talvez descomentar isso aq
-                client_socket.sendall(transcription.encode("utf-8"))
+                
+                client_socket.sendall(transcription[:15].encode("utf-8"))
 
 
                 # Reseta o acumulador para próximo áudio 

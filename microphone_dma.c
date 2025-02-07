@@ -1,17 +1,11 @@
 #include <stdio.h>
-//#include <math.h>
 #include <string.h>
 #include "pico/stdlib.h"
 #include "hardware/adc.h"
-//#include "hardware/dma.h"
-//#include "neopixel.c"
-#include "pico/cyw43_arch.h"   //e se eu botar o path completo?
-
+#include "pico/cyw43_arch.h"  
 #include "lwip/tcp.h"
 #include <stdint.h>
 #include "inc/ssd1306.h"
-
-
 #include "hardware/i2c.h"
 
 #define I2C_PORT i2c1
@@ -25,7 +19,7 @@
 #define WAV_SAMPLE_RATE  22050
 #define WAV_PWM_COUNT   (125000000 / WAV_SAMPLE_RATE)
 
-#define SERVER_IP "192.168.1.193" // Substitua pelo IP do servidor Flask
+
 #define SERVER_PORT 5000
 
 // Pino e canal do microfone no ADC.
@@ -33,85 +27,49 @@
 #define MIC_PIN (26 + MIC_CHANNEL)
 
 
-
-
-
 // Parâmetros e macros do ADC.
 #define ADC_CLOCK_DIV 2177.28
 
-//#define ADC_CLOCK_DIV 96.f
-//#define ADC_CLOCK_DIV 3000.f  //novo teste
 
-#define CHUNK_SIZE 1200 //so um teste, ver se melhora
+
+#define CHUNK_SIZE 1024
 #define AUDIO_PERIOD    3
-#define SAMPLES      (WAV_SAMPLE_RATE * AUDIO_PERIOD)  //acho que nao tem necessidade, ja que ainda quero fazer isso no servidor mesmo
+#define SAMPLES      (WAV_SAMPLE_RATE * AUDIO_PERIOD)  
 
 
 
-// Pino e número de LEDs da matriz de LEDs.
+
 #define GREEN_LED_PIN 11
 #define BLUE_LED_PIN 12
 #define RECORD_BTN  5
-#define LISTEN_BTN  6
 
 
 
 
-
-
-// Canal e configurações do DMA
-/*uint dma_channel;
-dma_channel_config dma_cfg;
-*/
-// Buffer de amostras do ADC.
 unsigned long sample_count = 0;
 unsigned long long sample_period;
 uint16_t adc_buffer[SAMPLES];
 static struct tcp_pcb *client_pcb;
 
 
-static char recv_buffer[10]; // Buffer para armazenar dados recebidos
+
+char send_buffer[4 + 2048];
+
+
+static char recv_buffer[15]; // Buffer para armazenar dados recebidos
 static size_t recv_buffer_len = 0;
 char *data = NULL; 
 size_t data_len;
 
 uint16_t listen_flag = 1; 
 bool is_connected = false;
+volatile bool is_recording = false;
+
 
 
 //declaracao de funcoes
 
 
-/**
- * Realiza as leituras do ADC e armazena os valores no buffer.
- */
-/*void sample_mic() {
-  adc_fifo_drain(); // Limpa o FIFO do ADC.
-  adc_run(false); // Desliga o ADC (se estiver ligado) para configurar o DMA.
-
-  dma_channel_configure(dma_channel, &dma_cfg,
-    adc_buffer, // Escreve no buffer.
-    &(adc_hw->fifo), // Lê do ADC.
-    SAMPLES, // Faz SAMPLES amostras.
-    true // Liga o DMA.
-  );
-
-  // Liga o ADC e espera acabar a leitura.
-  adc_run(true);
-  dma_channel_wait_for_finish_blocking(dma_channel);
-  
-  // Acabou a leitura, desliga o ADC de novo.
-  adc_run(false);
-
-  for (size_t i = 0; i < SAMPLES; i++) {
-        
-        int16_t audio_sample = (int16_t)((adc_buffer[i] * 32) - 32768); // Converte para escala de áudio.
-
-        // Substitui os valores no buffer original (ou use outro buffer, se preferir).
-        adc_buffer[i] = audio_sample;
-    }
-
-}*/
 
 void sample_mic_no_dma()
 {
@@ -132,23 +90,7 @@ void sample_mic_no_dma()
 
 
 
-//acho que o problema ta aqui. e nem to printando isso ne.
-// Callback when data is received
-/*static err_t recv_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
-    if (p == NULL) {
-        // Connection closed
-        tcp_close(tpcb);
-    } else {
-        // Process received data
-        printf("recebi dados uhu");
-        tcp_recved(tpcb, p->len); // Acknowledge data reception
-        pbuf_free(p); // Free the buffer  //testar sem isso aqui
-    }
-    return ERR_OK;
-}*/
-
-
-// Callback when data is received
+// Callback para o recebimento de dados
 static err_t recv_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
     if (p == NULL) {
         // Conexão fechada pelo cliente
@@ -187,9 +129,9 @@ static err_t recv_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_
 
 
 
-// Callback when data is sent
+// Callback para o envio de dados
 static err_t sent_callback(void *arg, struct tcp_pcb *tpcb, u16_t len) {
-    printf("Data sent successfully.\n");
+    printf("Dados enviados.\n");
     return ERR_OK;
 }
 
@@ -203,16 +145,16 @@ static err_t connect_callback(void *arg, struct tcp_pcb *tpcb, err_t err) {
 }
 
 
-// Callback when an error occurs
+// Callback de erro
 static void error_callback(void *arg, err_t err) {
-    printf("Connection error: %d\n", err);
+    printf("erro de conexão: %d\n", err);
 }
 
 
 void connect_to_server(){
     ip_addr_t server_ip;
-    IP4_ADDR(&server_ip, 192, 168, 1, 193); // IP do servidor
-    //static bool is_connected = false; 
+    IP4_ADDR(&server_ip, 192, 168, 1, 101); // IP do servidor
+   
 
     if(!is_connected)
     {
@@ -252,26 +194,18 @@ void connect_to_server(){
 
 void send_to_server(uint16_t *data, size_t len) {
     ip_addr_t server_ip;
-    IP4_ADDR(&server_ip, 192, 168, 1, 193); // IP do servidor
+    IP4_ADDR(&server_ip, 192, 168, 1, 101); // IP do servidor
     
     tcp_arg(client_pcb, data); // Passar dados para o callback
     if(is_connected)
     {
         printf("envio de dados\n");
 
-        // Obter os dados de áudio e seu comprimento
-        //uint16_t *data = (uint16_t *)arg;
-        //size_t len = SAMPLES;
-
+        
         // Calcular o tamanho total em bytes dos dados de áudio (2 bytes por amostra)
         size_t data_size = len * sizeof(uint16_t);
 
-        // Criar um buffer para os dados a serem enviados
-        char *send_buffer = malloc(4 + data_size); // 4 bytes para o tamanho + dados binários
-        if (send_buffer == NULL) {
-            printf("Erro ao alocar memória para o buffer.\n");
-            return;
-        }
+        
 
         // Adicionar o tamanho dos dados (4 bytes no início)
         send_buffer[0] = (data_size >> 24) & 0xFF;
@@ -287,7 +221,7 @@ void send_to_server(uint16_t *data, size_t len) {
         if ((4 + data_size) > available_space) {
             printf("Espaço insuficiente no buffer TCP: %d bytes disponíveis, %lu bytes necessários\n",
                 available_space, 4 + data_size);
-            free(send_buffer); // Liberar o buffer alocado
+            
             return; // Retornar para evitar tentar o envio
         }
 
@@ -296,23 +230,17 @@ void send_to_server(uint16_t *data, size_t len) {
         err_t write_err = tcp_write(client_pcb, send_buffer, 4 + data_size, TCP_WRITE_FLAG_COPY);
         if (write_err != ERR_OK) {
             printf("Erro ao enviar dados: %d\n", write_err);
-            free(send_buffer);
+          
             return;
         }
 
         printf("Dados enviados (%lu bytes).\n", 4 + data_size);
 
         // Garantir que os dados sejam transmitidos
-        //tcp_output(client_pcb);  //só um teste gente kkkkkk
-        free(send_buffer);
-
-        
-
+        //tcp_output(client_pcb);  //com isso aq da erro de panic, nao tem jeito
     
     }
-
     
-
 }
 
 char* get_received_data(size_t *data_len) {
@@ -327,12 +255,42 @@ char* get_received_data(size_t *data_len) {
 }
 
 
+void gpio_callback(uint gpio, uint32_t events)
+{
+    if (gpio == RECORD_BTN)
+    {
+        is_recording = !is_recording;
+    }
+}
+
+
+
 
 int main() {
   stdio_init_all();
 
   // Delay para o usuário abrir o monitor serial...
   sleep_ms(1000);
+
+  gpio_init(GREEN_LED_PIN);
+  gpio_set_dir(GREEN_LED_PIN, GPIO_OUT);  
+  gpio_put(GREEN_LED_PIN, 0);  
+
+  gpio_init(BLUE_LED_PIN);
+  gpio_set_dir(BLUE_LED_PIN, GPIO_OUT);  
+  gpio_put(BLUE_LED_PIN, 0);
+
+
+
+  gpio_init(RECORD_BTN);
+  gpio_set_dir(RECORD_BTN,GPIO_IN);
+  gpio_pull_up(RECORD_BTN);
+
+  // Configurar interrupção no botão (queda de borda)
+  gpio_set_irq_enabled_with_callback(RECORD_BTN, GPIO_IRQ_EDGE_FALL, true, &gpio_callback);
+
+
+
 
   // Configurar Wi-Fi
   if (cyw43_arch_init()) {
@@ -341,8 +299,12 @@ int main() {
   }
   cyw43_arch_enable_sta_mode();
 
-  const char *ssid = "LIVE TIM_7660_2G";
+  /*const char *ssid = "Galaxy A12A7EA";
+  const char *password = "prtd7966";*/
+
+  const char *ssid = "EXT_LIVE TIM_7660_2G";
   const char *password = "Z248ZmXH";
+
   printf("Conectando ao Wi-Fi...\n");
   if (cyw43_arch_wifi_connect_timeout_ms(ssid, password, CYW43_AUTH_WPA2_AES_PSK, 10000)) {
       printf("Falha ao conectar ao Wi-Fi.\n");
@@ -365,38 +327,16 @@ int main() {
 
   printf("ADC Configurado!\n\n");
 
-  printf("Preparando DMA...");
+
 
   
 
-  gpio_init(GREEN_LED_PIN);
-  gpio_set_dir(GREEN_LED_PIN, GPIO_OUT);  
-  gpio_put(GREEN_LED_PIN, 0);  
+  
 
-  gpio_init(BLUE_LED_PIN);
-  gpio_set_dir(BLUE_LED_PIN, GPIO_OUT);  
-  gpio_put(BLUE_LED_PIN, 0);
+  
+  sleep_ms(5000);  //acho que da pra tirar isso aq
 
-
-
-  gpio_init(RECORD_BTN);
-  gpio_set_dir(RECORD_BTN,GPIO_IN);
-  gpio_pull_up(RECORD_BTN);
-
-  gpio_init(LISTEN_BTN);
-  gpio_set_dir(LISTEN_BTN,GPIO_IN);
-  gpio_pull_up(LISTEN_BTN);
-
-
-  printf("Configuracoes completas!\n");
-
-  printf("\n----\nIniciando loop...\n----\n");
-
-
-  sleep_ms(5000);
-
-  printf("começando a gravar");
-
+  
     
 
   connect_to_server();
@@ -433,8 +373,14 @@ int main() {
 
   while (true) {
 
+        /*if(!gpio_get(RECORD_BTN))
+        {
+            is_recording = !(is_recording);
+        }*/
 
-        if(!gpio_get(RECORD_BTN))
+
+
+        if(is_recording)
         {    
             printf("Iniciando gravação...\n");
             gpio_put(BLUE_LED_PIN,0);
@@ -465,11 +411,11 @@ int main() {
 
                 // Passar o ponteiro deslocado para a função send_to_server
                 send_to_server(&adc_buffer[i], current_chunk_size);
-                sleep_ms(600);
+                sleep_ms(500);
             }
 
 
-            send_to_server(&listen_flag, 1); // Envia a flag ao servidor com tamanho 1
+            send_to_server(&listen_flag, 1); // Envia a flag ao servidor 
             
             memset(ssd, 0, ssd1306_buffer_length);
             render_on_display(ssd, &frame_area);
@@ -506,7 +452,7 @@ int main() {
             }
 
 
-            sleep_ms(5000); 
+            sleep_ms(8000); 
             
 
 
@@ -517,13 +463,7 @@ int main() {
 
     sleep_ms(100);  
 
-    /*else if (!gpio_get(LISTEN_BTN)) 
-    {
-        printf("Botão LISTEN pressionado\n");
-
-        send_to_server(&listen_flag, 1); // Envia a flag ao servidor com tamanho 1
-        sleep_ms(500); // Evita múltiplos envios acidentais se o botão for segurado
-    }*/
+    
         
 
   }

@@ -1,17 +1,11 @@
 #include <stdio.h>
-//#include <math.h>
 #include <string.h>
 #include "pico/stdlib.h"
 #include "hardware/adc.h"
-//#include "hardware/dma.h"
-//#include "neopixel.c"
-#include "pico/cyw43_arch.h"   //e se eu botar o path completo?
-
+#include "pico/cyw43_arch.h"  
 #include "lwip/tcp.h"
 #include <stdint.h>
 #include "inc/ssd1306.h"
-
-
 #include "hardware/i2c.h"
 
 #define I2C_PORT i2c1
@@ -31,9 +25,6 @@
 // Pino e canal do microfone no ADC.
 #define MIC_CHANNEL 2
 #define MIC_PIN (26 + MIC_CHANNEL)
-
-
-
 
 
 // Parâmetros e macros do ADC.
@@ -72,7 +63,8 @@ size_t data_len;
 
 uint16_t listen_flag = 1; 
 bool is_connected = false;
-bool is_recording = false;
+volatile bool is_recording = false;
+
 
 
 //declaracao de funcoes
@@ -162,7 +154,7 @@ static void error_callback(void *arg, err_t err) {
 void connect_to_server(){
     ip_addr_t server_ip;
     IP4_ADDR(&server_ip, 192, 168, 1, 101); // IP do servidor
-    //static bool is_connected = false; 
+   
 
     if(!is_connected)
     {
@@ -209,10 +201,7 @@ void send_to_server(uint16_t *data, size_t len) {
     {
         printf("envio de dados\n");
 
-        // Obter os dados de áudio e seu comprimento
-        //uint16_t *data = (uint16_t *)arg;
-        //size_t len = SAMPLES;
-
+        
         // Calcular o tamanho total em bytes dos dados de áudio (2 bytes por amostra)
         size_t data_size = len * sizeof(uint16_t);
 
@@ -250,14 +239,8 @@ void send_to_server(uint16_t *data, size_t len) {
         // Garantir que os dados sejam transmitidos
         //tcp_output(client_pcb);  //com isso aq da erro de panic, nao tem jeito
     
-
-        
-
-    
     }
-
     
-
 }
 
 char* get_received_data(size_t *data_len) {
@@ -270,6 +253,16 @@ char* get_received_data(size_t *data_len) {
         return NULL;
     }
 }
+
+
+void gpio_callback(uint gpio, uint32_t events)
+{
+    if (gpio == RECORD_BTN)
+    {
+        is_recording = !is_recording;
+    }
+}
+
 
 
 
@@ -293,9 +286,9 @@ int main() {
   gpio_set_dir(RECORD_BTN,GPIO_IN);
   gpio_pull_up(RECORD_BTN);
 
-  //gpio_put(BLUE_LED_PIN,1);
+  // Configurar interrupção no botão (queda de borda)
+  gpio_set_irq_enabled_with_callback(RECORD_BTN, GPIO_IRQ_EDGE_FALL, true, &gpio_callback);
 
-  
 
 
 
@@ -334,7 +327,7 @@ int main() {
 
   printf("ADC Configurado!\n\n");
 
-  printf("Preparando DMA...");
+
 
   
 
@@ -380,10 +373,10 @@ int main() {
 
   while (true) {
 
-        if(!gpio_get(RECORD_BTN))
+        /*if(!gpio_get(RECORD_BTN))
         {
             is_recording = !(is_recording);
-        }
+        }*/
 
 
 
@@ -422,7 +415,7 @@ int main() {
             }
 
 
-            send_to_server(&listen_flag, 1); // Envia a flag ao servidor com tamanho 1
+            send_to_server(&listen_flag, 1); // Envia a flag ao servidor 
             
             memset(ssd, 0, ssd1306_buffer_length);
             render_on_display(ssd, &frame_area);

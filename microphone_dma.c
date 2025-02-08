@@ -208,17 +208,17 @@ void send_to_server(uint16_t *data, size_t len) {
         
 
         // Adicionar o tamanho dos dados (4 bytes no início)
-        send_buffer[0] = (data_size >> 24) & 0xFF;
+        /*send_buffer[0] = (data_size >> 24) & 0xFF;
         send_buffer[1] = (data_size >> 16) & 0xFF;
         send_buffer[2] = (data_size >> 8) & 0xFF;
-        send_buffer[3] = data_size & 0xFF;
+        send_buffer[3] = data_size & 0xFF;*/
 
         // Copiar os dados de áudio para o buffer após os 4 bytes iniciais
-        memcpy(send_buffer + 4, data, data_size);
+        memcpy(send_buffer , data, data_size);
 
         // Verificar espaço disponível no buffer TCP
         uint16_t available_space = tcp_sndbuf(client_pcb);
-        if ((4 + data_size) > available_space) {
+        if ((data_size) > available_space) {
             printf("Espaço insuficiente no buffer TCP: %d bytes disponíveis, %lu bytes necessários\n",
                 available_space, 4 + data_size);
             
@@ -227,18 +227,20 @@ void send_to_server(uint16_t *data, size_t len) {
 
 
         // Enviar os dados
-        err_t write_err = tcp_write(client_pcb, send_buffer, 4 + data_size, TCP_WRITE_FLAG_COPY);
+        err_t write_err = tcp_write(client_pcb, send_buffer, data_size, TCP_WRITE_FLAG_COPY);
         if (write_err != ERR_OK) {
             printf("Erro ao enviar dados: %d\n", write_err);
           
             return;
         }
 
-        printf("Dados enviados (%lu bytes).\n", 4 + data_size);
+       
 
-        // Garantir que os dados sejam transmitidos
-        //tcp_output(client_pcb);  //com isso aq da erro de panic, nao tem jeito
-    
+        
+
+        printf("Dados enviados (%lu bytes).\n", data_size);
+
+        
     }
     
 }
@@ -373,12 +375,7 @@ int main() {
 
   while (true) {
 
-        /*if(!gpio_get(RECORD_BTN))
-        {
-            is_recording = !(is_recording);
-        }*/
-
-
+        
 
         if(is_recording)
         {    
@@ -411,9 +408,10 @@ int main() {
 
                 // Passar o ponteiro deslocado para a função send_to_server
                 send_to_server(&adc_buffer[i], current_chunk_size);
-                sleep_ms(500);
+                sleep_ms(300);
             }
 
+            sleep_ms(1000);    
 
             send_to_server(&listen_flag, 1); // Envia a flag ao servidor 
             

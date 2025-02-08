@@ -18,9 +18,9 @@ import csv
 
 
 # Configurações do servidor
-SERVER_IP = '192.168.1.101'  # Aceita conexões de qualquer IP
+SERVER_IP = '192.168.117.4'  # Aceita conexões de qualquer IP
 SERVER_PORT = 5000
-BUFFER_SIZE = 4096  # Tamanho do buffer para receber dados
+BUFFER_SIZE = 132300  # Tamanho do buffer para receber dados
 AUDIO_DURATION = 2  # Duração do áudio em segundos
 TIMEOUT = 30
 
@@ -151,50 +151,62 @@ def receive_data():
     client_socket, client_address = start_server()
     print(f"Conexão estabelecida com o cliente {client_address}.")
 
+    data_buffer = b""
+
     while True:
         
         try:
-            # Recebe os primeiros 4 bytes com o tamanho do dado
-            size_data = client_socket.recv(4)
-            if len(size_data) < 4:
-                raise ValueError("Tamanho dos dados inválido.")
+              # Buffer para armazenar os pacotes recebidos
 
-            data_size = int.from_bytes(size_data, byteorder='big')
-            print(f"Tamanho dos dados recebidos: {data_size} bytes")
+            packet = client_socket.recv(BUFFER_SIZE)
 
-            # Recebe os dados binários
-            data = b""
-            while len(data) < data_size:
-                packet = client_socket.recv(BUFFER_SIZE)
-                if not packet:
-                    raise ConnectionError("Conexão encerrada pelo cliente.")
-                data += packet
+            if len(packet) == 2: 
 
-            # Se o tamanho do dado for 2 bytes, interpretamos como a flag de processar
-            if data_size == 2 and data[0] == 1:
-                print("Flag LISTEN recebida, processando o áudio acumulado...")
-                # Chama a função para processar o áudio
-                transcription = process_audio(full_audio_data, SAMPLE_RATE)
+                print("recebi listenn")
 
+                print(packet)
+
+                listen_flag = int.from_bytes(packet, byteorder='big')
                 
-                client_socket.sendall(transcription[:15].encode("utf-8"))
+                print(listen_flag)
 
 
-                # Reseta o acumulador para próximo áudio 
-                ##vamos pensar em talvez nao resetar ne, nao sei
-                ### colocar mais um input aqui, perguntando se quer acumular ou quer resetar
+                listen_flag2 = packet[0] + (packet[1] << 8)
+                print(f"Flag manualmente convertida: {listen_flag2}")
 
-                full_audio_data = []
-                total_samples = 0
-            
-            else:
-                # Caso contrário, trata como dados de áudio
-                audio_data = np.frombuffer(data, dtype=np.uint16)
-                print(f"Recebendo áudio: {audio_data}")
-                full_audio_data.append(audio_data)
-                total_samples += len(audio_data)
+                if listen_flag2 == 1:
+                    print("Flag LISTEN recebida, processando o áudio acumulado...")
+                    
+                    audio_data = np.frombuffer(data_buffer, dtype=np.uint16)
+                    #print(f"Recebendo áudio: {audio_data}")
 
-                print(f"Dados acumulados: {total_samples} amostras")
+                    full_audio_data.append(audio_data)
+                    total_samples += len(full_audio_data)
+
+                    print(f"Dados acumulados: {total_samples} amostras")
+
+        
+                    
+                    transcription = process_audio(full_audio_data, SAMPLE_RATE)
+                    #transcription = "eu quero ser um instrumento vivo"
+
+                    #print(transcription[:15])
+
+                    client_socket.sendall(transcription[:15].encode("utf-8"))
+
+                   
+                    full_audio_data = []
+                    total_samples = 0
+
+                data_buffer = b""
+            if not packet:
+                raise ConnectionError("Conexão encerrada pelo cliente.")
+
+            data_buffer += packet  # Acumula os pacotes recebidos
+
+
+            print(f"dados recebidos: {len(packet)}")
+            print(f"dados acumulados: {len(data_buffer)}")
 
         except socket.timeout:
             print("Timeout atingido. Nenhum dado recebido dentro do período esperado.")

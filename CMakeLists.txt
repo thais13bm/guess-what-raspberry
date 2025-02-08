@@ -58,62 +58,56 @@ include(pico_sdk_import.cmake)
 
 
 
-project(microphone_dma C CXX ASM)
+project(guess_what_client C CXX ASM)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(microphone_dma microphone_dma.c inc/ssd1306_i2c.c)
+add_executable(guess_what_client guess_what_client.c inc/ssd1306_i2c.c)
 
-pico_set_program_name(microphone_dma "microphone_dma")
-pico_set_program_version(microphone_dma "0.1")
+pico_set_program_name(guess_what_client "guess_what_client")
+pico_set_program_version(guess_what_client "0.1")
 
 # Generate PIO header
-pico_generate_pio_header(microphone_dma ${CMAKE_CURRENT_LIST_DIR}/ws2818b.pio)
+pico_generate_pio_header(guess_what_client ${CMAKE_CURRENT_LIST_DIR}/ws2818b.pio)
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(microphone_dma 0)
-pico_enable_stdio_usb(microphone_dma 1)
+pico_enable_stdio_uart(guess_what_client 0)
+pico_enable_stdio_usb(guess_what_client 1)
 
 
 
 
 # Add the standard library to the build
-target_link_libraries(microphone_dma
+target_link_libraries(guess_what_client
         
         pico_stdlib)
 
 # Add the standard include files to the build
-target_include_directories(microphone_dma PRIVATE
+target_include_directories(guess_what_client PRIVATE
   ${CMAKE_CURRENT_LIST_DIR}
 
   ${PICO_SDK_PATH}/lib/lwip/contrib/ports/freertos/include
-   # ${PICO_SDK_PATH}/lib/lwip/contrib/ports/unix/port/include
-   # ${PICO_SDK_PATH}/lib/lwip/contrib/ports/win32/include
-   # ${PICO_SDK_PATH}/lib/lwip/test/unit/arch
+ 
 )
 
 # Add any user requested libraries
-target_link_libraries(microphone_dma 
+target_link_libraries(guess_what_client 
         #hardware_dma
         hardware_timer
         hardware_adc
         hardware_pio
         hardware_clocks
         hardware_i2c
-        #pico_cyw43_arch_lwip_sys_freertos
-        #FreeRTOS-Kernel-Heap4
-        #pico_async_context_freertos
+   
         pico_cyw43_arch_lwip_threadsafe_background
-        #pico_cyw43_arch_lwip_poll
+     
         )
 
 
-#if (PICO_CYW43_SUPPORTED)
- #   add_compile_definitions(CYW43_LWIP=1)
-#endif()       
+      
 
-pico_add_extra_outputs(microphone_dma)
+pico_add_extra_outputs(guess_what_client)
 

@@ -32,7 +32,7 @@
 
 
 
-#define CHUNK_SIZE 1024
+#define CHUNK_SIZE 1200
 #define AUDIO_PERIOD    3
 #define SAMPLES      (WAV_SAMPLE_RATE * AUDIO_PERIOD)  
 
@@ -53,10 +53,10 @@ static struct tcp_pcb *client_pcb;
 
 
 
-char send_buffer[4 + 2048];
+char send_buffer[2400];
 
 
-static char recv_buffer[15]; // Buffer para armazenar dados recebidos
+static char recv_buffer[16]; // Buffer para armazenar dados recebidos
 static size_t recv_buffer_len = 0;
 char *data = NULL; 
 size_t data_len;
@@ -153,7 +153,7 @@ static void error_callback(void *arg, err_t err) {
 
 void connect_to_server(){
     ip_addr_t server_ip;
-    IP4_ADDR(&server_ip, 192, 168, 1, 101); // IP do servidor
+    IP4_ADDR(&server_ip, 192, 168, 117, 4); // IP do servidor
    
 
     if(!is_connected)
@@ -194,7 +194,7 @@ void connect_to_server(){
 
 void send_to_server(uint16_t *data, size_t len) {
     ip_addr_t server_ip;
-    IP4_ADDR(&server_ip, 192, 168, 1, 101); // IP do servidor
+    IP4_ADDR(&server_ip, 192, 168, 117, 4); // IP do servidor
     
     tcp_arg(client_pcb, data); // Passar dados para o callback
     if(is_connected)
@@ -301,11 +301,11 @@ int main() {
   }
   cyw43_arch_enable_sta_mode();
 
-  /*const char *ssid = "Galaxy A12A7EA";
-  const char *password = "prtd7966";*/
+  const char *ssid = "Galaxy A12A7EA";
+  const char *password = "prtd7966";
 
-  const char *ssid = "EXT_LIVE TIM_7660_2G";
-  const char *password = "Z248ZmXH";
+  /*const char *ssid = "EXT_LIVE TIM_7660_2G";
+  const char *password = "Z248ZmXH";*/
 
   printf("Conectando ao Wi-Fi...\n");
   if (cyw43_arch_wifi_connect_timeout_ms(ssid, password, CYW43_AUTH_WPA2_AES_PSK, 10000)) {
@@ -336,7 +336,7 @@ int main() {
   
 
   
-  sleep_ms(5000);  //acho que da pra tirar isso aq
+  //sleep_ms(5000);  //acho que da pra tirar isso aq
 
   
     
@@ -392,8 +392,8 @@ int main() {
             printf("termino da gravacao");
 
             // mandando ao servidor
-            memset(ssd, 0, ssd1306_buffer_length);
-            ssd1306_draw_string(ssd, 0, 0, "Enviando audio");
+           
+            ssd1306_draw_string(ssd, 5, 24, "Enviando audio");
             
             render_on_display(ssd, &frame_area);
 
@@ -408,7 +408,7 @@ int main() {
 
                 // Passar o ponteiro deslocado para a função send_to_server
                 send_to_server(&adc_buffer[i], current_chunk_size);
-                sleep_ms(300);
+                sleep_ms(500);
             }
 
             sleep_ms(1000);    

@@ -18,7 +18,7 @@ import csv
 
 
 # Configurações do servidor
-SERVER_IP = '192.168.1.101'  # Aceita conexões de qualquer IP
+SERVER_IP = '192.168.117.4'  # Aceita conexões de qualquer IP
 SERVER_PORT = 5000
 BUFFER_SIZE = 132300  # Tamanho do buffer para receber dados
 AUDIO_DURATION = 2  # Duração do áudio em segundos
@@ -188,6 +188,10 @@ def receive_data():
         
                     
                     transcription = process_audio(full_audio_data, SAMPLE_RATE)
+                    #transcription = "eu quero ser um instrumento vivo"
+
+                    #print(transcription[:15])
+
                     client_socket.sendall(transcription[:15].encode("utf-8"))
 
                    

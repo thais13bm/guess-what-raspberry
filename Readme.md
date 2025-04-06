@@ -6,7 +6,7 @@ The GuessWhat system is capable of capturing 3-second audio snippets, sending th
 
 ## 🚀 How to Run
 
-### Connections
+### Wi-fi connectivity
 
 - Edit the code to include the correct IPs and Wi-Fi credentials before running the project.
 

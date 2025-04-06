@@ -20,6 +20,9 @@ python3 server_tcp.py
 - Compile the firmware using the Pico SDK.
 - Flash it via USB 
 
+### Additional information
+
+- You can find more details about hardware connection/requirements, motivation and code explanation in the PDF report. 
 
 
 

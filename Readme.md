@@ -4,6 +4,24 @@ The **GuessWhat** project consists of a distributed system for classifying sound
 
 The GuessWhat system is capable of capturing 3-second audio snippets, sending them via Wi-Fi to a server, which then pre-processes the sound and returns a classification — for example, whether the sound is speech, music, crying, or animal noise.
 
+## 🚀 How to Run
+
+### Connections
+
+- Edit the code to include the correct IPs and Wi-Fi credentials before running the project.
+
+
+### Start the server
+```bash
+python3 server_tcp.py
+```
+
+### Upload the firmware to the Raspberry Pi Pico W
+- Compile the firmware using the Pico SDK.
+- Flash it via USB 
+
+
+
 
 
 
